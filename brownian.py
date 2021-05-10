@@ -11,8 +11,9 @@ from matplotlib.mlab import stride_windows
 from copy import copy
 from numba import jit
 from cmath import sqrt
-from scipy.signal import welch
 from scipy.integrate import simps
+from scipy.signal import welch, detrend
+sigdetrend = detrend # Alias
 
 kB = 1.381e-23  # Boltzmann's constant
 
@@ -121,7 +122,7 @@ def sim(m, gamma, K, T, dt, tmax, x0=None, v0=None, **params):
 
 def partition(xs, dt, taumax=None, noverlap=0):
     """Split xs into chunks overlapping by `noverlap` points.
-    Each chunk is length taumax given for xs collected at a sample rate of 1/dt"""
+    Each chunk is length taumax for xs collected at a sample rate of 1/dt"""
     if taumax is None:
         taumax = (xs.size - 1)*dt
     Npts = min(len(xs), int(taumax/dt))
@@ -129,7 +130,7 @@ def partition(xs, dt, taumax=None, noverlap=0):
     return xpart
 
 
-def logbin_average(x, Npts=100, func=np.mean):
+def logbin_func(x, Npts=100, func=np.mean):
     ndecades = np.log10(x.size) - np.log10(1)
     npoints = int(ndecades) * Npts
     parts = np.logspace(
@@ -140,6 +141,17 @@ def logbin_average(x, Npts=100, func=np.mean):
         [func(x[parts[i]: parts[i + 1]]) for i in range(len(parts) - 1)]
     )
 
+
+def detrend(xs, dt, taumax=None, mode='constant'):
+    xdetrend = np.zeros_like(xs)
+    xpart = partition(xs, dt, taumax)
+    lens = [len(xp) for xp in xpart]
+    i=0
+    for xp in xpart:
+        L = len(xp)
+        xdetrend[i:i+L] = sigdetrend(xp, type=mode)
+        i += L
+    return xdetrend
 
 def PSD(xs, dt, taumax=None, detrend="linear", window="hamming", noverlap=0):
     xpart = partition(xs, dt, taumax)
@@ -174,7 +186,8 @@ def AVAR(xs, dt, func=np.mean, octave=True):
         vals = func(xparts, axis=1)
         avars[j] = np.mean((vals[1:] - vals[:-1])**2) / 2
         davars[j] = np.var(vals)
-    return taus, avars, davars
+    Navg = 1
+    return taus, avars, Navg
 
 
 def NVAR(xs, dt, func=np.mean, octave=True):
@@ -193,13 +206,30 @@ def NVAR(xs, dt, func=np.mean, octave=True):
         vals = np.array([func(x) for x in xparts])
         nvars[j] = np.mean((vals - m)**2)
         dnvars[j] = np.var(vals)
-    return taus, nvars, dnvars
+    Navg = 1
+    return taus, nvars, Navg
+
+def HIST(xs, dt, taumax=None, lb=None, ub=None, Nbins=45, density=True):
+    xpart = partition(xs, dt, taumax)
+    Navg = len(xpart)
+    histavg = 0
+    if lb is None:
+        lb = xs.min()
+    if ub is None:
+        ub = xs.max()
+    bins = np.linspace(lb, ub, Nbins, endpoint=True)
+    for xp in xpart:
+        hist, edges = np.histogram(xp, bins=bins, density=density)
+        histavg += hist / Navg
+    bins = edges[:-1] + np.diff(edges) / 2
+    return bins, histavg, Navg
+
 
 
 @jit(nopython=True)
 def MSD_jit(x):
     N = x.size
-    msd = np.zeros(N, dtype=np.float32)
+    msd = np.zeros(N-1, dtype=np.float32)
     for lag in range(1, N):
         diffs = x[:-lag] - x[lag:]
         msd[lag - 1] = np.mean(diffs**2)
@@ -219,7 +249,7 @@ def MSD(xs, dt, taumax=None):
         msdavg += MSD_jit(xp) / Navg
 
     tmsd = np.arange(1, len(msdavg)+1) * dt
-    return tmsd, msdavg
+    return tmsd, msdavg, Navg
 
 
 def ACF(xs, dt, taumax=None):
@@ -237,7 +267,7 @@ def ACF(xs, dt, taumax=None):
         acfavg += acf
     acfavg /= Navg
     tacf = np.arange(0, len(acfavg)) * dt
-    return tacf, acfavg
+    return tacf, acfavg, Navg
 
 
 def S_statistic(p, q, freq, psd):
@@ -359,8 +389,8 @@ def pacf_from_msd(msd, T, k, **kwargs):
 
 def dataplot(ax, x, y, Npts=0, color="k", **kwargs):
     if Npts > 0:
-        plot_x = logbin_average(x, Npts=Npts)
-        plot_y = logbin_average(y, Npts=Npts)
+        plot_x = logbin_func(x, Npts=Npts)
+        plot_y = logbin_func(y, Npts=Npts)
     else:
         plot_x = x
         plot_y = y
@@ -378,7 +408,7 @@ def dataplot(ax, x, y, Npts=0, color="k", **kwargs):
 if __name__ == "__main__":
     tmax = 5
     dt = 1/2e6
-    load = False
+    load = True
     save = True
 
     params = make_sim_params(
@@ -408,9 +438,9 @@ if __name__ == "__main__":
 
         # run analysis
         freq, psd, n = PSD(xs[:, i], dt, taumax=40e-3)
-        tmsd, msd = MSD(xs[:, i], dt, taumax=40e-3)
-        tpacf, pacf = ACF(xs[:, i], dt, taumax=40e-3)
-        tvacf, vacf = ACF(vs[:, i], dt, taumax=40e-3)
+        tmsd, msd, Navg = MSD(xs[:, i], dt, taumax=40e-3)
+        tpacf, pacf, Navg = ACF(xs[:, i], dt, taumax=40e-3)
+        tvacf, vacf, Navg = ACF(vs[:, i], dt, taumax=40e-3)
         tavar, avar, davar = AVAR(vs[:, i], dt, func=np.mean)
         tnvar, nvar, dnvar = NVAR(vs[:, i], dt, func=np.mean)
 
@@ -422,7 +452,7 @@ if __name__ == "__main__":
         abc, pcov0 = abc_guess(freq[mask], psd[mask], n=n)
         kest, rhoest, Aest = get_krhoA(*abc, **params)
 
-        # plot PSD fit
+       # plot PSD fit
         #axs[0, 0].loglog(freq, psd_abc_func(freq, *abc), color="purple")
         #axs[0].axvline(fmin)
         #axs[0].axvline(fmax)
