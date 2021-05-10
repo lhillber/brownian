@@ -124,6 +124,7 @@ class TimeSeries:
         if t is None:
             assert r is not None
             t = np.arange(0, x[:].size) / r
+        self.name = name
         self.t = t
         self.x = x[:]
         self._x_bak = copy(x[:])
@@ -155,14 +156,13 @@ class TimeSeries:
                 self.x = x2
         return t2, x2
 
-
     def detrend(self, taumax, mode='constant', inplace=False):
         x2 = detrend(self.x, 1/self.r, taumax=taumax, mode=mode)
         if inplace:
             self.x = x2
         return self.t, x2
 
-    def PSD(self, taumax=None, detrend="linear", window="hamming", noverlap=0):
+    def PSD(self, taumax=None, detrend="linear", window="hann", noverlap=None):
         """ Power spectral density """
         freq, psd, Navg = PSD(self.x, 1/self.r, taumax=taumax, detrend=detrend, window=window, noverlap=noverlap)
         self.freq = freq
@@ -170,17 +170,17 @@ class TimeSeries:
         self.Navg_psd = Navg
         return freq, psd, Navg
 
-    def ACF(self, taumax=None):
+    def ACF(self, taumax=None, n_jobs=1):
         """ Autocorrelation function """
-        tacf, acf, Navg = ACF(self.x, 1/self.r, taumax=taumax)
+        tacf, acf, Navg = ACF(self.x, 1/self.r, taumax=taumax, n_jobs=n_jobs)
         self.tacf = tacf
         self.acf = acf
         self.Navg_acf = Navg
         return tacf, acf, Navg
 
-    def MSD(self, taumax=None):
+    def MSD(self, taumax=None, n_jobs=1):
         """ Mean-squared displacement """
-        tmsd, msd, Navg = MSD(self.x, 1/self.r, taumax=taumax)
+        tmsd, msd, Navg = MSD(self.x, 1/self.r, taumax=taumax, n_jobs=n_jobs)
         self.tmsd = tmsd
         self.msd = msd
         self.Navg_msd = Navg
@@ -227,7 +227,7 @@ class Collection:
     def __init__(self, fname, r=None, coord="x", bin_average=1):
         TF = TdmsFile(fname)["main"]
         t0s = TF["t0"][:]
-        t0s -= t0[0]
+        t0s -= t0s[0]
         t0s /= 1e6
         self.t0s = t0s
         self.R = TF.properties["R"]
@@ -266,8 +266,6 @@ class Collection:
         setattr(self, tkey(key), t)
         setattr(self, "Navg_"+key, self.Nrecords*Navg)
         return t, avg
-
-
 
     def apply(self, method_str, n_jobs=1, **kwargs):
         def workload(timeseries):

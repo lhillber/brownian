@@ -11,6 +11,7 @@ from matplotlib.mlab import stride_windows
 from copy import copy
 from numba import jit
 from cmath import sqrt
+from joblib import Parallel, delayed
 from scipy.integrate import simps
 from scipy.signal import welch, detrend
 sigdetrend = detrend # Alias
@@ -153,7 +154,7 @@ def detrend(xs, dt, taumax=None, mode='constant'):
         i += L
     return xdetrend
 
-def PSD(xs, dt, taumax=None, detrend="linear", window="hamming", noverlap=0):
+def PSD(xs, dt, taumax=None, detrend="linear", window="hann", noverlap=None):
     xpart = partition(xs, dt, taumax)
     Navg = len(xpart)
     freq = fft.rfftfreq(xpart[0].size, dt)
@@ -239,33 +240,27 @@ def MSD_jit(x):
 MSD_jit(np.array([1.0, 2.9, 3.0, 4.0]))
 
 
-def MSD(xs, dt, taumax=None):
+def MSD(xs, dt, taumax=None, n_jobs=1):
     """Mean squared displacement"""
     xpart = partition(xs, dt, taumax)
     Navg = len(xpart)
-    msdavg = 0
     # average MSD of each partion
-    for xp in xpart:
-        msdavg += MSD_jit(xp) / Navg
-
+    res = Parallel(n_jobs=n_jobs)(delayed(MSD_jit)(xp) for xp in xpart)
+    msdavg = np.mean(res, axis=0)
     tmsd = np.arange(1, len(msdavg)+1) * dt
     return tmsd, msdavg, Navg
 
+def ACF_workload(xp):
+    n = len(xp)
+    corr = np.correlate(xp, xp, mode='full')[-n:]
+    return corr / np.arange(n, 0, -1)
 
-def ACF(xs, dt, taumax=None):
+def ACF(xs, dt, taumax=None, n_jobs=1):
     """Auto correlation function"""
     xpart = partition(xs, dt, taumax)
     Navg = len(xpart)
-    acfavg = 0
-    # average ACF of each partion
-    m = xs.mean()
-    for xp in xpart:
-        m2 = np.mean(xp)
-        n = len(xp)
-        acf = np.correlate(
-            xp, xp, mode='full')[-n:] / (np.arange(n, 0, -1))
-        acfavg += acf
-    acfavg /= Navg
+    res = Parallel(n_jobs=n_jobs)(delayed(ACF_workload)(xp) for xp in xpart)
+    acfavg = np.mean(res, axis=0)
     tacf = np.arange(0, len(acfavg)) * dt
     return tacf, acfavg, Navg
 
@@ -321,13 +316,13 @@ def abc_guess(freq, psd, n=1):
     return popt0, pcov0
 
 def gaussian_func(x, var, mean=0):
-    return np.exp(-(x - mean)**2 / (2 * var)) / (np.sqrt(2 * PI * var))
+    return np.exp(-(x - mean)**2 / (2 * var)) / (np.sqrt(2 * np.pi * var))
 
 def psd_abc_func(f, a, b, c, **kwargs):
     return 1 / np.abs((a + b * f ** 2 + c * f ** 4))
 
 
-def psdfunc(f, k, rho, T, R, eta=None, **kwargs):
+def psd_func(f, k, rho, T, R, eta=None, **kwargs):
     if eta is None:
         eta = get_eta(T)
     m = 4*np.pi*rho*R**3/3
@@ -337,7 +332,7 @@ def psdfunc(f, k, rho, T, R, eta=None, **kwargs):
     return 4 * kB * T * gamma / denom
 
 
-def msdfunc(t, k, rho, T, R, eta=None, **kwargs):
+def msd_func(t, k, rho, T, R, eta=None, **kwargs):
     if eta is None:
         eta = get_eta(T)
     m = 4*np.pi*rho*R**3/3
@@ -351,7 +346,7 @@ def msdfunc(t, k, rho, T, R, eta=None, **kwargs):
     return 2*kB*T/k * (1 - cs * np.exp(-t/(2*taup)))
 
 
-def pacfunc(t, k, rho, T, R, eta=None, **kwargs):
+def pac_func(t, k, rho, T, R, eta=None, **kwargs):
     if eta is None:
         eta = get_eta(T)
     m = 4*np.pi*rho*R**3/3
@@ -365,7 +360,7 @@ def pacfunc(t, k, rho, T, R, eta=None, **kwargs):
     return kB*T/k * cs * np.exp(-t/(2*taup))
 
 
-def vacfunc(t, k, rho, T, R, eta=None, **kwargs):
+def vac_func(t, k, rho, T, R, eta=None, **kwargs):
     if eta is None:
         eta = get_eta(T)
     m = 4*np.pi*rho*R**3/3
@@ -447,7 +442,7 @@ if __name__ == "__main__":
         # Estimate parameters from PSD
         fmin = 75
         fmax = 1e4
-        Npts = 25
+        Npts = 10
         mask = np.logical_and(freq < fmax, freq > fmin)
         abc, pcov0 = abc_guess(freq[mask], psd[mask], n=n)
         kest, rhoest, Aest = get_krhoA(*abc, **params)
@@ -465,7 +460,7 @@ if __name__ == "__main__":
 
         # PSD plot
         dataplot(axs[0, 0], freq, psd, Npts=Npts)
-        axs[0, 0].plot(freq, psdfunc(freq, **params), c="r")
+        axs[0, 0].plot(freq, psd_func(freq, **params), c="r")
         axs[0, 0].set_ylabel(r"PSD ($\mathrm{m^2/Hz}$)")
         axs[0, 0].set_xlabel("$f$ (Hz)")
         axs[0, 0].set_yscale("log")
@@ -473,7 +468,7 @@ if __name__ == "__main__":
 
         # MSD plot
         dataplot(axs[0, 1], tmsd, msd, Npts=Npts)
-        axs[0, 1].plot(tmsd, msdfunc(tmsd, **params), c="r")
+        axs[0, 1].plot(tmsd, msd_func(tmsd, **params), c="r")
         axs[0, 1].set_ylabel(r"MSD ($\mathrm{m^2}$)")
         axs[0, 1].set_xlabel(r"$\tau$ (s)")
         axs[0, 1].set_yscale("log")
@@ -481,14 +476,14 @@ if __name__ == "__main__":
 
         # PACF plot
         dataplot(axs[1, 0], tpacf, pacf, Npts=Npts)
-        axs[1, 0].plot(tpacf, pacfunc(tpacf, **params), c="r")
+        axs[1, 0].plot(tpacf, pac_func(tpacf, **params), c="r")
         axs[1, 0].set_ylabel("PACF ($\mathrm{m^2}$)")
         axs[1, 0].set_xlabel(r"$\tau$ (s)")
         axs[1, 0].set_xscale("log")
 
         # VACF plot
         #dataplot(axs[1, 1], tvacf, vacf, Npts=Npts)
-        #axs[1, 1].plot(tpacf, vacfunc(tvacf, **params), c="r")
+        #axs[1, 1].plot(tpacf, vac_func(tvacf, **params), c="r")
         #axs[1, 1].set_ylabel("VACF ($\mathrm{m^2/s^2}$)")
         #axs[1, 1].set_xlabel(r"$\tau$ (s)")
         #axs[1, 1].set_xscale("log")
