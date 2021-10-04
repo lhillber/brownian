@@ -13,13 +13,11 @@ from scipy.optimize import curve_fit, minimize
 from nptdms import TdmsFile
 from scipy.signal import detrend
 from joblib import Parallel, delayed
-from brownian import partition, detrend, PSD, MSD, ACF, AVAR, NVAR, HIST
+from brownian import (
+    partition, bin_func, detrend, PSD, MSD, ACF, AVAR, NVAR, HIST, logbin_func, PI, kB
+    )
 
-# Constants
-# =========
 
-PI = np.pi
-kB = 1.382e-23
 
 
 # File I/O
@@ -145,16 +143,22 @@ class TimeSeries:
         self.x = self._x_bak
         self.t = self._t_bak
 
-    def bin_average(self, Npts, inplace=False):
+
+    def bin_func(self, Npts, func=np.mean, inplace=False):
         if Npts in (1, None):
             t2, x2 = self.t, self.x
         else:
-            x2 = np.mean(partition(self.x, dt=1/self.r, taumax=Npts/self.r), axis=1)
-            t2 = np.mean(partition(self.t, dt=1/self.r, taumax=Npts/self.r), axis=1)
+            x2 = bin_func(self.x, dt=1/self.r, taumax=(Npts-1)/self.r)
+            t2 = bin_func(self.t, dt=1/self.r, taumax=(Npts-1)/self.r)
             if inplace:
                 self.t = t2
                 self.x = x2
         return t2, x2
+
+
+    def bin_average(self, Npts, inplace=False):
+        return self.bin_func(Npts)
+
 
     def detrend(self, taumax=None, mode='constant', inplace=False):
         x2 = detrend(self.x, 1/self.r, taumax=taumax, mode=mode)
@@ -162,8 +166,6 @@ class TimeSeries:
             self.x = x2
         return self.t, x2
 
-    def DATA(self, pow=1):
-        return self.t, self.x**pow, 1
 
     def PSD(self, taumax=None, detrend="linear", window="hann", noverlap=None):
         """ Power spectral density """
@@ -235,7 +237,8 @@ class Collection:
         self.tdms_file = tdms_file
         self.t0 = t0
         self.Nrecords = len(self.t0)
-        self.channel = "Channel is not set!"
+        self.colletion_name = "Collection channel is not set!"
+        self.collection = []
 
 
     def __getattr__(self, attr):
@@ -275,7 +278,7 @@ class Collection:
         return np.arange(self.size) / self.r
 
 
-    def set_channel(self, name="x", bin_average=1):
+    def set_collection(self, name="x", bin_average=1):
         if name[-1].upper() in ("X", "Y"):
             r = self.params['r']
             name = name.upper()
@@ -293,7 +296,7 @@ class Collection:
         if take_firstdiff:
             Cs = [TimeSeries( firstdiff( C() ), name=name) for C in Cs]
         self.collection = Cs
-        self.channel = name
+        self.collection_name = name
 
 
     def average(self, method_str, n_jobs=1, **kwargs):
@@ -309,6 +312,17 @@ class Collection:
         setattr(self, tkey(key), t)
         setattr(self, "Navg_"+key, self.Nrecords*Navg)
         return t, avg
+
+
+    def aggrigate(self, power=1):
+        agg = 0
+        for C in self.collection:
+            t, x = C()
+            agg += x**power
+        agg = agg**(1/power)
+        self.agg_power = power
+        self.agg = TimeSeries(t, agg, name=f"{self.collection_name}_aggrigate")
+        return t, agg
 
 
     def apply(self, method_str, n_jobs=1, **kwargs):
