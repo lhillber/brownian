@@ -156,11 +156,14 @@ class TimeSeries:
                 self.x = x2
         return t2, x2
 
-    def detrend(self, taumax, mode='constant', inplace=False):
+    def detrend(self, taumax=None, mode='constant', inplace=False):
         x2 = detrend(self.x, 1/self.r, taumax=taumax, mode=mode)
         if inplace:
             self.x = x2
         return self.t, x2
+
+    def DATA(self, pow=1):
+        return self.t, self.x**pow, 1
 
     def PSD(self, taumax=None, detrend="linear", window="hann", noverlap=None):
         """ Power spectral density """
@@ -224,26 +227,40 @@ class TimeSeries:
 
 
 class Collection:
-    def __init__(self, fname, r=None, coord="x", bin_average=1):
-        TF = TdmsFile(fname)["main"]
-        t0s = TF["t0"][:]
-        t0s -= t0s[0]
-        t0s /= 1e6
-        self.t0s = t0s
-        self.R = TF.properties["R"]
-        self.Is = TF["I"][:]
-        self.Vs = TF["V"][:]
-        self.Ts = TF["T"][:]
-        self.PDFs = TF["PDF"][:]
-        self.PDBs = TF["PDB"][:]
-        self.Nrecords = len(self.t0s)
-        self.coord = coord
-        r = TF.properties["r"]
-        Cs = [TimeSeries(TF[f"{coord.upper().split('V')[-1]}_{idx}"], r=r, name=coord) for idx in range(self.Nrecords)]
-        [C.bin_average(Npts=bin_average, inplace=True) for C in Cs]
-        if coord[0].lower() == "v":
-            Cs = [TimeSeries( firstdiff( C() ), name=coord) for C in Cs]
-        self.collection = Cs
+    def __init__(self, fname):
+        tdms_file = TdmsFile(fname)["main"]
+        t0 = tdms_file["t0"][:]
+        t0 -= t0[0]
+        t0 /= 1e6
+        self.tdms_file = tdms_file
+        self.t0 = t0
+        self.Nrecords = len(self.t0)
+        self.channel = "Channel is not set!"
+
+
+    def __getattr__(self, attr):
+        if attr[-1] == "s":
+            return np.array([getattr(self, attr[:-1]+f"_{idx}") for idx in range(self.Nrecords)])
+        try:
+            return self.tdms_file[attr]
+        except KeyError:
+            try:
+                return self.tdms_file.properties[attr]
+            except KeyError:
+                print(f"No property or channel '{attr}'")
+
+
+    @property
+    def params(self):
+        return self.tdms_file.properties
+
+    @property
+    def available_channels(self):
+        return [str(ch).split("/")[-1][1:-2] for ch in self.tdms_file.channels()]
+
+    @property
+    def channels(self):
+        return sorted(list(set([ch.split("_")[0] for ch in self.available_channels])))
 
     @property
     def r(self):
@@ -252,6 +269,32 @@ class Collection:
     @property
     def size(self):
         return self.collection[-1].size
+
+    @property
+    def t(self):
+        return np.arange(self.size) / self.r
+
+
+    def set_channel(self, name="x", bin_average=1):
+        if name[-1].upper() in ("X", "Y"):
+            r = self.params['r']
+            name = name.upper()
+        else:
+            r = self.params['r2']
+
+        if name.upper() in ("VX", "VY"):
+            name = name[1].upper()
+            take_firstdiff = True
+        else:
+            take_firstdiff = False
+
+        Cs = [TimeSeries(C, r=r, name=name) for C in getattr(self, name+"s")]
+        [C.bin_average(Npts=bin_average, inplace=True) for C in Cs]
+        if take_firstdiff:
+            Cs = [TimeSeries( firstdiff( C() ), name=name) for C in Cs]
+        self.collection = Cs
+        self.channel = name
+
 
     def average(self, method_str, n_jobs=1, **kwargs):
         def workload(timeseries):
@@ -266,6 +309,7 @@ class Collection:
         setattr(self, tkey(key), t)
         setattr(self, "Navg_"+key, self.Nrecords*Navg)
         return t, avg
+
 
     def apply(self, method_str, n_jobs=1, **kwargs):
         def workload(timeseries):
