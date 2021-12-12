@@ -17,6 +17,7 @@ from scipy.signal import welch, detrend
 sigdetrend = detrend # Alias
 
 kB = 1.381e-23  # Boltzmann's constant
+PI = np.pi
 
 def get_eta(T, etap=1.83245e-5, Tp=23+273.15, S=110.4):
     """Sutherlands model for viscosity of air at temperature T"""
@@ -129,6 +130,10 @@ def partition(xs, dt, taumax=None, noverlap=0):
     Npts = min(len(xs), int(taumax/dt))
     xpart = stride_windows(xs, n=Npts, noverlap=noverlap, axis=0).T
     return xpart
+
+
+def bin_func(xs, dt, taumax=None, func=np.mean):
+    return func(partition(xs, dt=dt, taumax=taumax), axis=1)
 
 
 def logbin_func(x, Npts=100, func=np.mean):
@@ -298,7 +303,9 @@ def get_Smat(freq, psd):
     return Smat, Sinvmat, Svec
 
 
-def get_krhoA(a, b, c, R, T, eta, **kwargs):
+def get_krhoA(a, b, c, R, T, eta=None, **kwargs):
+    if eta is None:
+        eta = get_eta(T)
     d2 = b + 2 * np.sqrt(a*c)
     k = 12 * np.pi**2 * eta * R * np.sqrt(a/d2)
     rho = 9 * eta / (4*np.pi*R**2) * np.sqrt(c/d2)

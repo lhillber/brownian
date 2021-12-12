@@ -157,7 +157,7 @@ class TimeSeries:
 
 
     def bin_average(self, Npts, inplace=False):
-        return self.bin_func(Npts)
+        return self.bin_func(Npts, inplace=inplace)
 
 
     def detrend(self, taumax=None, mode='constant', inplace=False):
@@ -242,7 +242,7 @@ class Collection:
 
 
     def __getattr__(self, attr):
-        if attr[-1] == "s":
+        if attr[-1] == "s" and attr != "pos":
             return np.array([getattr(self, attr[:-1]+f"_{idx}") for idx in range(self.Nrecords)])
         try:
             return self.tdms_file[attr]
@@ -318,7 +318,7 @@ class Collection:
         agg = 0
         for C in self.collection:
             t, x = C()
-            agg += x**power
+            agg += x**power / self.Nrecords
         agg = agg**(1/power)
         self.agg_power = power
         self.agg = TimeSeries(t, agg, name=f"{self.collection_name}_aggrigate")
