@@ -1,0 +1,1 @@
+{"wavelength0": 1.064e-06, "n_medium": 1.0, "c": 300000000.0, "beam_names": ["F", "B"], "R": 1.5849999999999999e-06, "n_particle": 1.2, "NA_F": 0.7, "polarization_F": [1, 0], "angle_F": 0.0, "NA_B": 0.7, "polarization_B": [0, 1], "angle_B": 180.0, "meshspec": [[-3e-06, 3e-06, 101], [-3e-06, 3e-06, 101], [-3e-06, 3e-06, 101]], "offset": [0.0, 0.0, 0.0]}
