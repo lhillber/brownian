@@ -5,7 +5,7 @@
 
 from time import time
 import numpy as np
-from numpy import fft
+from constants import kB
 import matplotlib.pyplot as plt
 from matplotlib.mlab import stride_windows
 from copy import copy
@@ -16,40 +16,17 @@ from scipy.integrate import simps
 from scipy.signal import welch, detrend
 sigdetrend = detrend # Alias
 
-kB = 1.381e-23  # Boltzmann's constant
-PI = np.pi
 
-def get_eta(T, etap=1.83245e-5, Tp=23+273.15, S=110.4):
+def get_viscosity(T, etap=1.83245e-5, Tp=23+273.15, S=110.4):
     """Sutherlands model for viscosity of air at temperature T"""
     return etap*(T/Tp)**(3/2) * (Tp + S) / (T+S)
 
 
-def make_sim_params(K, rho, R, T, field=None, field_params={}):
-    eta = get_eta(T)
-    m = 4*np.pi*rho*R**3/3
-    gamma = 6*np.pi*eta*R
-    dim = len(K)
-    params = dict(K=K,
-                  rho=rho,
-                  R=R,
-                  eta=eta,
-                  T=T,
-                  m=m,
-                  dim=dim,
-                  gamma=gamma,
-                  Gamma=gamma/m,
-                  taup=m/gamma,
-                  field=field)
-    return {**params, **field_params}
+def get_mass(R, density):
+    return 4/3 * np.pi * density * R**3
 
-
-def acceleration(xs, vs, t, m, gamma, K, T, dt, field, **params):
-    dim = len(K)
-    G = np.sqrt(2*kB*T*gamma)
-    a = (-K*xs - gamma*vs + G*np.random.normal(size=dim)*dt**(-1/2)) / m
-    if field is not None:
-        a += field(xs, t, **params) / m
-    return a
+def get_gamma(R, viscosity):
+    return 6 * np.pi * viscosity * R
 
 
 def setup(m, gamma, k, T, dt):
@@ -74,27 +51,6 @@ def setup(m, gamma, k, T, dt):
              [lp*lm*(cp-cm), lp*cp - lm*cm]]
           ) / (lp - lm)
     return expm.real, Dxv1.real, Dxv2.real
-
-
-def sim2(m, gamma, K, T, dt, tmax, field, x0=None, v0=None, **params):
-    """ Second solver. TODO: Benchmark agains first"""
-    dim = len(K)
-    if x0 is None:
-        x0 = np.array([np.random.normal(0, np.sqrt(kB*T/k)) for k in K])
-    if v0 is None:
-        v0 = np.random.normal(0, np.sqrt(kB*T/m), dim)
-    ts = np.arange(0, tmax, dt)
-    xs = np.zeros((len(ts), dim))
-    vs = np.zeros((len(ts), dim))
-    xs[0] = x0
-    vs[0] = v0
-    vs[1] = v0 + dt * acceleration(x0, v0, ts[0], m, gamma, K, T, dt, field, **params)
-    xs[1] = x0 + dt*vs[1]
-    for ti in range(1, len(ts)-1):
-        xs[ti+1] = 2*xs[ti] - xs[ti-1] + dt * dt * \
-            acceleration(xs[ti], vs[ti], ts[ti], m, gamma, K, T, dt, field, **params)
-        vs[ti+1] = (xs[ti+1] - xs[ti-1]) / (2*dt)
-    return xs, vs, ts
 
 
 def sim(m, gamma, K, T, dt, tmax, x0=None, v0=None, **params):
@@ -166,7 +122,7 @@ def detrend(xs, dt, taumax=None, mode='constant'):
 def PSD(xs, dt, taumax=None, detrend="linear", window="hann", noverlap=None):
     xpart = partition(xs, dt, taumax)
     Navg = len(xpart)
-    freq = fft.rfftfreq(xpart[0].size, dt)
+    #freq = fft.rfftfreq(xpart[0].size, dt)
     psdavg = 0
     # average PSD of each partions
     for xp in xpart:
@@ -309,7 +265,7 @@ def get_Smat(freq, psd):
 
 def get_krhoA(a, b, c, R, T, eta=None, **kwargs):
     if eta is None:
-        eta = get_eta(T)
+        eta = get_viscosity(T)
     d2 = b + 2 * np.sqrt(a*c)
     k = 12 * np.pi**2 * eta * R * np.sqrt(a/d2)
     rho = 9 * eta / (4*np.pi*R**2) * np.sqrt(c/d2)
@@ -335,7 +291,7 @@ def psd_abc_func(f, a, b, c, **kwargs):
 
 def psd_func(f, k, rho, T, R, eta=None, **kwargs):
     if eta is None:
-        eta = get_eta(T)
+        eta = get_viscosity(T)
     m = 4*np.pi*rho*R**3/3
     gamma = 6*np.pi*eta*R
     omega = 2*np.pi * f
@@ -345,7 +301,7 @@ def psd_func(f, k, rho, T, R, eta=None, **kwargs):
 
 def msd_func(t, k, rho, T, R, eta=None, **kwargs):
     if eta is None:
-        eta = get_eta(T)
+        eta = get_viscosity(T)
     m = 4*np.pi*rho*R**3/3
     gamma = 6*np.pi*eta*R
     Omega = np.sqrt(k / m)
@@ -359,7 +315,7 @@ def msd_func(t, k, rho, T, R, eta=None, **kwargs):
 
 def pac_func(t, k, rho, T, R, eta=None, **kwargs):
     if eta is None:
-        eta = get_eta(T)
+        eta = get_viscosity(T)
     m = 4*np.pi*rho*R**3/3
     gamma = 6*np.pi*eta*R
     Omega = np.sqrt(k / m)
@@ -373,7 +329,7 @@ def pac_func(t, k, rho, T, R, eta=None, **kwargs):
 
 def vac_func(t, k, rho, T, R, eta=None, **kwargs):
     if eta is None:
-        eta = get_eta(T)
+        eta = get_viscosity(T)
     m = 4*np.pi*rho*R**3/3
     gamma = 6*np.pi*eta*R
     Omega = np.sqrt(k / m)

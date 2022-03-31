@@ -7,14 +7,15 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.mlab import stride_windows
+from constants import units
 from copy import copy
 from scipy.integrate import simps
 from scipy.optimize import curve_fit, minimize
 from nptdms import TdmsFile
-from scipy.signal import detrend
+from scipy.signal import detrend, butter, sosfiltfilt
 from joblib import Parallel, delayed
 from brownian import (
-    partition, bin_func, detrend, PSD, MSD, ACF, AVAR, NVAR, HIST, logbin_func, PI, kB
+    partition, bin_func, detrend, PSD, MSD, ACF, AVAR, NVAR, HIST, logbin_func
     )
 
 
@@ -144,6 +145,13 @@ class TimeSeries:
         self.t = self._t_bak
 
 
+    def calibrate(self, cal, inplace=False):
+        x2  = cal * self.x
+        if inplace:
+            self.x = x2
+        return x2
+
+        self.x = cal*x2
     def bin_func(self, Npts, func=np.mean, inplace=False):
         if Npts in (1, None):
             t2, x2 = self.t, self.x
@@ -162,6 +170,15 @@ class TimeSeries:
 
     def detrend(self, taumax=None, mode='constant', inplace=False):
         x2 = detrend(self.x, 1/self.r, taumax=taumax, mode=mode)
+        if inplace:
+            self.x = x2
+        return self.t, x2
+
+    def lowpass(self, cutoff, order=3, inplace=False):
+        if cutoff in (None, "inf"):
+            return self.t, self.x
+        sos = butter(order, cutoff, fs=self.r, btype="lowpass", output="sos")
+        x2 = sosfiltfilt(sos, self.x)
         if inplace:
             self.x = x2
         return self.t, x2
@@ -214,17 +231,26 @@ class TimeSeries:
         self.Navg_hist = Navg
         return bins, hist, Navg
 
-    def plot(self, tmin=0, tmax=None, ax=None, figsize=(9,4), **kwargs):
+    def plot(self, tmin=0, tmax=None, ax=None, figsize=(9,4), unit="nm", tunit="ms", **kwargs):
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=figsize)
         else:
             fig = plt. gcf()
         if tmax is None:
             tmax = self.t[-1]
+        if type(unit) == str:
+            unit = units[unit]
+        elif type(unit) in (float, int):
+            unit = {"value":unit, "label":""}
+        if type(tunit) == str:
+            tunit = units[tunit]
+        elif type(tunit) in (float, int):
+            tunit = {"value":tunit, "label":""}
+
         mask = np.logical_and(self.t <= tmax, self.t >= tmin)
-        ax.plot(self.t[mask], self.x[mask], **kwargs)
-        ax.set_ylabel(f"Coordinate {self.name}")
-        ax.set_xlabel("Time (s)")
+        ax.plot(self.t[mask]/tunit["value"], self.x[mask]/unit["value"], **kwargs)
+        ax.set_ylabel(r"%s ($\rm %s$)" % (self.name, unit["label"]))
+        ax.set_xlabel(r"Time ($\rm %s$)" % tunit['label'])
         return fig, ax
 
 
@@ -277,24 +303,21 @@ class Collection:
     def t(self):
         return np.arange(self.size) / self.r
 
+    def differentiate(self):
+        name = "d_dt_"+self.collection_name
+        Cs = [TimeSeries( firstdiff( C() ), name=name) for C in self.collection]
+        self.collection = Cs
+        self.collection_name = name
 
-    def set_collection(self, name="x", bin_average=1):
+
+    def set_collection(self, name="x", lowpass=None, bin_average=None):
         if name[-1].upper() in ("X", "Y"):
             r = self.params['r']
             name = name.upper()
         else:
             r = self.params['r2']
 
-        if name.upper() in ("VX", "VY"):
-            name = name[1].upper()
-            take_firstdiff = True
-        else:
-            take_firstdiff = False
-
         Cs = [TimeSeries(C, r=r, name=name) for C in getattr(self, name+"s")]
-        [C.bin_average(Npts=bin_average, inplace=True) for C in Cs]
-        if take_firstdiff:
-            Cs = [TimeSeries( firstdiff( C() ), name=name) for C in Cs]
         self.collection = Cs
         self.collection_name = name
 
@@ -321,11 +344,17 @@ class Collection:
             agg += x**power / self.Nrecords
         agg = agg**(1/power)
         self.agg_power = power
-        self.agg = TimeSeries(t, agg, name=f"{self.collection_name}_aggrigate")
+        self.agg = TimeSeries((t, agg), name=f"{self.collection_name}_aggrigate")
         return t, agg
 
 
+    def apply_func(self, func, n_jobs=1, **kwargs):
+        def workload(timeseries):
+            return func(timeseries.t, timeseries.x, **kwargs)
+        Cs = Parallel(n_jobs=n_jobs)(delayed(workload)(C) for C in self.collection)
+        self.collection = Cs
+
     def apply(self, method_str, n_jobs=1, **kwargs):
         def workload(timeseries):
-            return getattr(timeseries, method_str)(**kwargs)
+            func = getattr(timeseries, method_str)(**kwargs)
         Parallel(n_jobs=n_jobs)(delayed(workload)(C) for C in self.collection)
