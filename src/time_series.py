@@ -143,6 +143,7 @@ class TimeSeries:
     def restore(self):
         self.x = self._x_bak
         self.t = self._t_bak
+        return self.t, self.x
 
 
     def calibrate(self, cal, inplace=False):
@@ -150,8 +151,8 @@ class TimeSeries:
         if inplace:
             self.x = x2
         return x2
-
         self.x = cal*x2
+
     def bin_func(self, Npts, func=np.mean, inplace=False):
         if Npts in (1, None):
             t2, x2 = self.t, self.x
@@ -174,15 +175,27 @@ class TimeSeries:
             self.x = x2
         return self.t, x2
 
-    def lowpass(self, cutoff, order=3, inplace=False):
+    def filter(self, cutoff, order=3, btype="lowpass", inplace=False):
         if cutoff in (None, "inf"):
             return self.t, self.x
-        sos = butter(order, cutoff, fs=self.r, btype="lowpass", output="sos")
+        sos = butter(order, cutoff, fs=self.r, btype=btype, output="sos")
         x2 = sosfiltfilt(sos, self.x)
         if inplace:
             self.x = x2
         return self.t, x2
 
+
+    def lowpass(self, cutoff, order=3, inplace=False):
+        return self.filter(cutoff=cutoff, order=order, btype="lowpass", inplace=inplace)
+
+
+    def differentiate(self, inplace=False):
+        t2, x2 = firstdiff((self.t, self.x))
+        if inplace:
+            self.x = x2
+            self.t = t2
+            self.name = "d_dt"+self.name
+        return t2, x2
 
     def PSD(self, taumax=None, detrend="linear", window="hann", noverlap=None):
         """ Power spectral density """
@@ -262,10 +275,12 @@ class Collection:
         t0 /= 1e6
         self.tdms_file = tdms_file
         self.t0 = t0
-        self.Nrecords = len(self.t0)
         self.colletion_name = "Collection channel is not set!"
         self.collection = []
 
+    @property
+    def Nrecords(self):
+        return len(self.t0)
 
     def __getattr__(self, attr):
         if attr[-1] == "s" and attr != "pos":
@@ -274,7 +289,7 @@ class Collection:
             return self.tdms_file[attr]
         except KeyError:
             try:
-                return self.tdms_file.properties[attr]
+                return self.params[attr]
             except KeyError:
                 print(f"No property or channel '{attr}'")
 
@@ -301,14 +316,7 @@ class Collection:
 
     @property
     def t(self):
-        return np.arange(self.size) / self.r
-
-    def differentiate(self):
-        name = "d_dt_"+self.collection_name
-        Cs = [TimeSeries( firstdiff( C() ), name=name) for C in self.collection]
-        self.collection = Cs
-        self.collection_name = name
-
+        return self.collection[-1].t
 
     def set_collection(self, name="x", lowpass=None, bin_average=None):
         if name[-1].upper() in ("X", "Y"):

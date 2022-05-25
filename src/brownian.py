@@ -28,6 +28,18 @@ def get_mass(R, density):
 def get_gamma(R, viscosity):
     return 6 * np.pi * viscosity * R
 
+def get_params_from_abcRT(a, b, c, R, T):
+    eta = get_viscosity(T)
+    d2 = b + 2 * np.sqrt(a*c)
+    k = 12 * np.pi**2 * eta * R * np.sqrt(a/d2)
+    rho = 9 * eta / (4*np.pi*R**2) * np.sqrt(c/d2)
+    cal_inv2 = 6*np.pi**3*eta*R / (kB*T * d2)
+    cal = 1 / np.sqrt(cal_inv2)
+    m = get_mass(R, rho)
+    gamma = get_gamma(R, eta)
+    taup = m / gamma
+    w0 = np.sqrt(k/m)
+    return {"a":a, "b":b, "c":c, "R":R, "Tavg":T, "k": k, "rho": rho, "cal": cal, "m": m, "gamma": gamma, "taup": taup, "w0": w0}
 
 def setup(m, gamma, k, T, dt):
     D = kB * T / gamma
