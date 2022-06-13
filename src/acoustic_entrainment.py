@@ -1,5 +1,5 @@
 import numpy as np
-from brownian import get_gamma, get_mass, get_viscosity
+from brownian import get_gamma, get_mass, get_viscosity, get_sound_speed, get_air_density
 from constants import kB
 from scipy.fft import rfft, rfftfreq, irfft
 from scipy.signal import get_window
@@ -7,20 +7,24 @@ from scipy.special import hankel2
 from time_series import TimeSeries
 
 class VelocityResponse:
-    def __init__(self, R, rho, T, k=0, c0=344, rho_fluid=1.225, mu=None):
+    def __init__(self, R, rho, T, RH=0, k=0, c0=None, rho_fluid=None, mu=None):
         self.R = R
         self.k = k
         self.rho = rho
         self.T = T
-        # Make c0 and rho_fluid T dependent like mu
+        self.RH = RH
+        if c0 is None:
+            c0 = get_soundspeed(self.T, self.RH)
+        if rho_fluid is None:
+            rho_fluid = get_air_density(self.T, self.RH)
+        if mu is None:
+            mu = get_viscosity(self.T, self.RH)
         self.c0 = c0
         self.rho_fluid = rho_fluid
-        self.Z0 = self.rho_fluid*self.c0
-
-        self.delta = self.rho_fluid / self.rho
-        if mu is None:
-            mu = get_viscosity(self.T)
         self.mu = mu
+
+        self.Z0 = self.rho_fluid*self.c0
+        self.delta = self.rho_fluid / self.rho
         self.nu = self.mu / self.rho_fluid
         self.m = get_mass(self.R, self.rho)
         self.gamma = get_gamma(self.R, self.mu)

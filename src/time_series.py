@@ -244,7 +244,7 @@ class TimeSeries:
         self.Navg_hist = Navg
         return bins, hist, Navg
 
-    def plot(self, tmin=0, tmax=None, ax=None, figsize=(9,4), unit="nm", tunit="ms", **kwargs):
+    def plot(self, shift=0, tmin=0, tmax=None, ax=None, figsize=(9,4), unit="nm", tunit="ms", **kwargs):
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=figsize)
         else:
@@ -259,9 +259,9 @@ class TimeSeries:
             tunit = units[tunit]
         elif type(tunit) in (float, int):
             tunit = {"value":tunit, "label":""}
-
-        mask = np.logical_and(self.t <= tmax, self.t >= tmin)
-        ax.plot(self.t[mask]/tunit["value"], self.x[mask]/unit["value"], **kwargs)
+        t = self.t + shift
+        mask = np.logical_and(t <= tmax, t >= tmin)
+        ax.plot(t[mask]/tunit["value"], self.x[mask]/unit["value"], **kwargs)
         ax.set_ylabel(r"%s ($\rm %s$)" % (self.name, unit["label"]))
         ax.set_xlabel(r"Time ($\rm %s$)" % tunit['label'])
         return fig, ax
@@ -283,7 +283,7 @@ class Collection:
         return len(self.t0)
 
     def __getattr__(self, attr):
-        if attr[-1] == "s" and attr != "pos":
+        if attr[-1] == "s" and attr not in ("pos", "fos"):
             return np.array([getattr(self, attr[:-1]+f"_{idx}") for idx in range(self.Nrecords)])
         try:
             return self.tdms_file[attr]
