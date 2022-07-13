@@ -17,39 +17,41 @@ from scipy.signal import welch, detrend
 sigdetrend = detrend # Alias
 
 
-def get_viscosity(T, etap=1.83245e-5, Tp=23+273.15, S=110.4):
-    """Sutherlands model for viscosity of air at temperature T"""
-    return etap*(T/Tp)**(3/2) * (Tp + S) / (T+S)
+#def get_viscosity(T, etap=1.83245e-5, Tp=23+273.15, S=110.4):
+#    """Sutherlands model for viscosity of air at temperature T"""
+#    return etap*(T/Tp)**(3/2) * (Tp + S) / (T+S)
 
 def get_air_density(T, RH=0.0):
     RHs = [0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0]
     orders = np.array([1, 1e-3, 1e-5, 1e-7])
     coefs = np.array([
-    [1.293076926, 4.668788752, 1.616496527, 0.270258690],
-	[1.293108555, 4.755745337, 1.840833144, 0.768566623],
-	[1.293140234, 4.842714106, 2.065234104, 1.266930718],
-	[1.293172031, 4.929691585, 2.289622204, 1.765272412],
-	[1.293203823, 5.016669259, 2.514022965, 2.263626682],
-	[1.293235188, 5.10362474,  2.73838242,  2.761958201],
-	[1.293266904, 5.190564282, 2.962671829, 3.260235828],
-	[1.293298927, 5.277566167, 3.187131352, 3.758628812],
-	[1.293330395, 5.364522222, 3.411479567, 4.256947646],
-	[1.293362125, 5.451485999, 3.635853785, 4.755289659],
-	[1.293393662, 5.538444326, 3.860201577, 5.2536065]
+    [1.293076926, -4.668788752, 1.616496527, -0.270258690],
+	[1.293108555, -4.755745337, 1.840833144, -0.768566623],
+	[1.293140234, -4.842714106, 2.065234104, -1.266930718],
+	[1.293172031, -4.929691585, 2.289622204, -1.765272412],
+	[1.293203823, -5.016669259, 2.514022965, -2.263626682],
+	[1.293235188, -5.10362474,  2.73838242,  -2.761958201],
+	[1.293266904, -5.190564282, 2.962671829, -3.260235828],
+	[1.293298927, -5.277566167, 3.187131352, -3.758628812],
+	[1.293330395, -5.364522222, 3.411479567, -4.256947646],
+	[1.293362125, -5.451485999, 3.635853785, -4.755289659],
+	[1.293393662, -5.538444326, 3.860201577, -5.2536065]
     ])
     if T <= 273.15:
         t = T
         T = T + 273.15
     else:
         t = T - 273.15
+    if RH < 1 and RH != 0:
+        RH *= 100
     if RH in RHs:
         ind = RHs.index(RH)
         return np.poly1d((coefs[ind]*orders)[::-1])(t)
     else:
         ind2 = np.digitize(RH, RHs)
         ind1 = ind2 - 1
-        rho1 = np.poly1d((coefs[ind1][::-1]*orders))(t)
-        rho2 = np.poly1d((coefs[ind1][::-1]*orders))(t)
+        rho1 = np.poly1d((coefs[ind1]*orders)[::-1])(t)
+        rho2 = np.poly1d((coefs[ind1]*orders)[::-1])(t)
         return rho1 +  (RH - RHs[ind1]) * (rho2 - rho1) / (RHs[ind2] - RHs[ind1])
 
 def get_viscosity(T, RH=0.0):
@@ -73,14 +75,16 @@ def get_viscosity(T, RH=0.0):
         T = T + 273.15
     else:
         t = T - 273.15
+    if RH < 1 and RH!=0:
+        RH *= 100
     if RH in RHs:
         ind = RHs.index(RH)
         return np.poly1d((coefs[ind]*orders)[::-1])(t)
     else:
         ind2 = np.digitize(RH, RHs)
         ind1 = ind2 - 1
-        mu1 = np.poly1d((coefs[ind1][::-1]*orders))(t)
-        mu2 = np.poly1d((coefs[ind1][::-1]*orders))(t)
+        mu1 = np.poly1d((coefs[ind1]*orders)[::-1])(t)
+        mu2 = np.poly1d((coefs[ind1]*orders)[::-1])(t)
         return mu1 +  (RH - RHs[ind1]) * (mu2 - mu1) / (RHs[ind2] - RHs[ind1])
 
 def get_sound_speed(T, RH=0, p=101325, xCo2=0):
@@ -89,6 +93,10 @@ def get_sound_speed(T, RH=0, p=101325, xCo2=0):
         T = T + 273.15
     else:
         t = T - 273.15
+    if RH > 1 and RH!=0:
+        RH /= 100
+    if p < 1000:
+        p *= 1000
     a0 = 331.5024
     a1 = 0.603055
     a2 = -0.000528
@@ -100,7 +108,7 @@ def get_sound_speed(T, RH=0, p=101325, xCo2=0):
     a8 = - 2.93e-10
     a9 = -85.20931
     a10 = -0.228525
-    all = 5.91e-5
+    a11 = 5.91e-5
     a12 = -2.835194
     a13 = -2.15e-13
     a14 = 29.179762
@@ -110,8 +118,8 @@ def get_sound_speed(T, RH=0, p=101325, xCo2=0):
     psv = np.exp(1.2811805e-5*T*T - 1.9509874e-2*T + 34.04926034 - 6.3536311e3/T)
     xw = RH * f * psv / p
     c0 = a0 + a1*t + a2*t*t +(a3+a4*t+a5*t*t)*xw
-    c0 += (a6+a7*t+a8*t*t)*p + (a9+a10*t+a11*t*t)*xc
-    c0 += a12*xw*xw + a13*p*p + a14*xc*xc + a15*xw*p*xc
+    c0 += (a6+a7*t+a8*t*t)*p + (a9+a10*t+a11*t*t)*xCo2
+    c0 += a12*xw*xw + a13*p*p + a14*xCo2*xCo2 + a15*xw*p*xCo2
     return c0
 
 
@@ -224,21 +232,28 @@ def detrend(xs, dt, taumax=None, mode='constant'):
         i += L
     return xdetrend
 
-def PSD(xs, dt, taumax=None, detrend="linear", window="hann", noverlap=None):
-    xpart = partition(xs, dt, taumax)
-    Navg = len(xpart)
-    #freq = fft.rfftfreq(xpart[0].size, dt)
-    psdavg = 0
-    # average PSD of each partions
-    for xp in xpart:
-        # Bartlet PSD is welch PSD with zero overlap
-        freq, psd = welch(xp, fs=1/dt, nperseg=xp.size, window=window,
+def PSD(xs, dt, taumax=None, tmin=None, tmax=None, detrend="linear", window="hann", noverlap=None):
+    if tmin is not None or tmax is not None:
+        ts = np.arange(len(xs)) * dt
+        if tmin is None:
+            tmin = ts[0]
+        if tmax is None:
+            tmax = ts[-1]
+        mask = np.logical_and(ts>tmin, ts<tmax)
+        xp = xs[mask]
+        freq, psdavg = welch(xp, fs=1/dt, nperseg=xp.size, window=window,
                           detrend=detrend, noverlap=noverlap)
-        psdavg += psd / Navg
-
-    # clip zero freq bin = average of signal
-    # psdavg = psdavg[1:]
-    # freq = freq[1:]
+        Navg = 1
+    else:
+        xpart = partition(xs, dt, taumax)
+        Navg = len(xpart)
+        psdavg = 0
+        # average PSD of each partions
+        for xp in xpart:
+            # Bartlet PSD is welch PSD with zero overlap
+            freq, psd = welch(xp, fs=1/dt, nperseg=xp.size, window=window,
+                              detrend=detrend, noverlap=noverlap)
+            psdavg += psd / Navg
     return freq, psdavg, Navg
 
 

@@ -5,16 +5,58 @@ from scipy.fft import rfft, rfftfreq, irfft
 from scipy.signal import get_window
 from scipy.special import hankel2
 from time_series import TimeSeries
+from scipy.interpolate import interp1d
+
+def _amp_factor(f1, f2):
+    return np.sqrt(1 + (f1/f2)**2)
+
+def muflown_sensitivity(f, lfs=11.4, fc1u=22, fc2u=595, fc3u=5456, fc4u=142):
+    denom = _amp_factor(fc1u, f)
+    denom *= _amp_factor(f, fc2u)
+    denom *= _amp_factor(f, fc3u)
+    denom *= _amp_factor(fc4u, f)
+    return lfs / denom
+
+def muflown_phase(f, C1u=16, C2u=570, C3u=22551, C4u=142):
+    ret = np.arctan(C1u/f)
+    ret -= np.arctan(f/C2u)
+    ret -= np.arctan(f/C3u)
+    ret += np.arctan(C4u/f)
+    return ret
+
+def muflown_response(f):
+    return muflown_sensitivity(f) * np.exp(1j*muflown_phase(f))
+
+def mic_sensitivity_interp (lfs, fs=np.array([250, 280, 315, 355, 400, 450, 500, 560, 630, 710, 800, 900, 1000,
+               1120, 1250, 1400, 1600, 1800, 2000, 2240, 2500, 2800, 3150, 3550,
+               4000, 4500, 5000, 5600, 6300, 7100, 8000, 9000, 10000, 11200, 12500,
+               14000, 16000, 18000, 20000, 22400, 25000, 28000, 31500, 35500, 40000,
+               45000, 50000, 56000, 63000, 71000, 80000, 90000, 100000, 1.12e5,
+               1.25e5, 1.4e5, 1.6e5, 1.8e5, 2.0e5]),
+               dBs=np.array([0.00, -0.01, -0.01, -0.01, -0.01, -0.01, -0.01, -0.02, -0.02, -0.02,
+                -0.02, -0.03, -0.03, -0.03, -0.04, -0.04, -0.05, -0.05, -0.05, -0.06,
+                -0.06, -0.06, -0.07, -0.07, -0.07, -0.07, -0.08, -0.08, -0.08, -0.07,
+                -0.12, -0.12, -0.14, -0.11, -0.10, -0.09, -0.09, -0.08, -0.06, -0.04,
+                -0.02, 0.00, 0.02, 0.02, 0.06, -0.14, -0.40, -0.58, -1.22, -0.90,
+                -0.83, -1.03, -1.41, -2.38, -2.65, -1.54, -3.61, -7.24, -13.84])):
+    sensitivity = lfs*10**(dBs/20)
+    interp = interp1d(fs, sensitivity, fill_value="extrapolate")
+    return interp
+
+def mic_response(f, lfs=0.68*1e-3):
+    return mic_sensitivity_interp(lfs=lfs)(f)
+
 
 class VelocityResponse:
-    def __init__(self, R, rho, T, RH=0, k=0, c0=None, rho_fluid=None, mu=None):
+    def __init__(self, sensitivity, R, rho, T, RH=0, k=0, c0=None, rho_fluid=None, mu=None):
+        self.sensitivity = sensitivity
         self.R = R
         self.k = k
         self.rho = rho
         self.T = T
         self.RH = RH
         if c0 is None:
-            c0 = get_soundspeed(self.T, self.RH)
+            c0 = get_sound_speed(self.T, self.RH)
         if rho_fluid is None:
             rho_fluid = get_air_density(self.T, self.RH)
         if mu is None:
@@ -35,7 +77,7 @@ class VelocityResponse:
 
     def response(self, name, f):
         F, G, H, I = getattr(self, f"_FGHI_{name}")(f)
-        return (F + 1j*G) / (H + 1j*I)
+        return self.sensitivity * (F + 1j*G) / (H + 1j*I)
 
 
     def amplitude(self, name, f):
@@ -144,7 +186,7 @@ class VelocityResponse:
         return 3*d* F, 3*d*G, H, I
 
 
-    def plane_impedance(self, f, r0):
+    def plane_impedance(self, f, r0=0):
         return self.Z0
 
 

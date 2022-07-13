@@ -12,7 +12,8 @@ from copy import copy
 from scipy.integrate import simps
 from scipy.optimize import curve_fit, minimize
 from nptdms import TdmsFile
-from scipy.signal import detrend, butter, sosfiltfilt
+from scipy.signal import butter, sosfiltfilt, sosfilt, get_window
+from scipy.fft import rfft, rfftfreq, irfft
 from joblib import Parallel, delayed
 from brownian import (
     partition, bin_func, detrend, PSD, MSD, ACF, AVAR, NVAR, HIST, logbin_func
@@ -184,6 +185,46 @@ class TimeSeries:
             self.x = x2
         return self.t, x2
 
+    def time_gate(self, tmin=None, tmax=None, inplace=False):
+        if tmin is None:
+            tmin =self.t[0]
+        if tmax is None:
+            tmax = self.t[-1]
+        mask = np.logical_and(self.t>=tmin, self.t<=tmax)
+        x2 = self.x[mask]
+        t2 = self.t[mask]
+        if inplace:
+            self.x = x2
+            self.t = t2
+        return t2, x2
+
+    def correct(self, response, tmin=None, tmax=None,
+        window="boxcar", differentiate=False, name=None):
+
+        if name is None:
+            name = self.name+" corrected"
+        dt = 1/self.r
+        t, sig = self.time_gate(tmin=tmin, tmax=tmax)
+        signal_length = len(sig)
+        freq = rfftfreq(signal_length, dt)[1:]
+        resp = response(freq)
+        resp = np.r_[1, resp]
+        freq = np.r_[0, freq]
+        win = get_window(window, signal_length)
+        corr = np.sqrt(np.sum(win**2)/signal_length) #amp correction
+        fft_vals = rfft(sig * win)
+        if differentiate:
+            fft_vals *= 1j * np.sin(2*np.pi*freq*dt)/dt
+            #fft_vals *= 1j * (2*np.pi*freq)
+        corrected_signal = irfft(fft_vals / corr / resp, n=signal_length)
+        D = TimeSeries(corrected_signal, t, name=name)
+        return D
+
+    def shift(self, tau, inplace=False):
+        t2 = self.t - tau
+        if inplace:
+            self.t = t2
+        return t2, self.x
 
     def lowpass(self, cutoff, order=3, inplace=False):
         return self.filter(cutoff=cutoff, order=order, btype="lowpass", inplace=inplace)
@@ -197,9 +238,9 @@ class TimeSeries:
             self.name = "d_dt"+self.name
         return t2, x2
 
-    def PSD(self, taumax=None, detrend="linear", window="hann", noverlap=None):
+    def PSD(self, taumax=None, tmin=None, tmax=None, detrend="linear", window="hann", noverlap=None):
         """ Power spectral density """
-        freq, psd, Navg = PSD(self.x, 1/self.r, taumax=taumax, detrend=detrend, window=window, noverlap=noverlap)
+        freq, psd, Navg = PSD(self.x, 1/self.r, taumax=taumax, tmin=tmin, tmax=tmax, detrend=detrend, window=window, noverlap=noverlap)
         self.freq = freq
         self.psd = psd
         self.Navg_psd = Navg
@@ -244,13 +285,12 @@ class TimeSeries:
         self.Navg_hist = Navg
         return bins, hist, Navg
 
-    def plot(self, shift=0, tmin=0, tmax=None, ax=None, figsize=(9,4), unit="nm", tunit="ms", **kwargs):
+    def plot(self, tmin=None, tmax=None, ax=None, figsize=(9,4), unit="V", tunit="s",
+             return_data=False, **kwargs):
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=figsize)
         else:
             fig = plt. gcf()
-        if tmax is None:
-            tmax = self.t[-1]
         if type(unit) == str:
             unit = units[unit]
         elif type(unit) in (float, int):
@@ -259,12 +299,14 @@ class TimeSeries:
             tunit = units[tunit]
         elif type(tunit) in (float, int):
             tunit = {"value":tunit, "label":""}
-        t = self.t + shift
-        mask = np.logical_and(t <= tmax, t >= tmin)
-        ax.plot(t[mask]/tunit["value"], self.x[mask]/unit["value"], **kwargs)
+        t, x = self.time_gate(tmin=tmin, tmax=tmax)
+        ax.plot(t/tunit["value"], x/unit["value"], **kwargs)
         ax.set_ylabel(r"%s ($\rm %s$)" % (self.name, unit["label"]))
         ax.set_xlabel(r"Time ($\rm %s$)" % tunit['label'])
-        return fig, ax
+        if return_data:
+            return fig, ax, t, x
+        else:
+            return fig, ax
 
 
 class Collection:
@@ -318,7 +360,7 @@ class Collection:
     def t(self):
         return self.collection[-1].t
 
-    def set_collection(self, name="x", lowpass=None, bin_average=None):
+    def set_collection(self, name="x"):
         if name[-1].upper() in ("X", "Y"):
             r = self.params['r']
             name = name.upper()
@@ -345,13 +387,16 @@ class Collection:
         return t, avg
 
 
-    def aggrigate(self, power=1):
+    def aggrigate(self, collection_slice=None):
+        if collection_slice is None:
+            collection_slice = slice(0, self.Nrecords, 1)
+        if type(collection_slice) == int:
+            collection_slice = slice(collection_slice, self.Nrecords, 1)
         agg = 0
-        for C in self.collection:
+        for C in self.collection[collection_slice]:
             t, x = C()
-            agg += x**power / self.Nrecords
-        agg = agg**(1/power)
-        self.agg_power = power
+            agg += x / self.Nrecords
+        agg = agg
         self.agg = TimeSeries((t, agg), name=f"{self.collection_name}_aggrigate")
         return t, agg
 
@@ -362,7 +407,10 @@ class Collection:
         Cs = Parallel(n_jobs=n_jobs)(delayed(workload)(C) for C in self.collection)
         self.collection = Cs
 
-    def apply(self, method_str, n_jobs=1, **kwargs):
+    def apply(self, method_str, n_jobs=1, recollect=False, **kwargs):
         def workload(timeseries):
             func = getattr(timeseries, method_str)(**kwargs)
-        Parallel(n_jobs=n_jobs)(delayed(workload)(C) for C in self.collection)
+            return func
+        ret = Parallel(n_jobs=n_jobs)(delayed(workload)(C) for C in self.collection)
+        if recollect:
+            self.collection = ret
