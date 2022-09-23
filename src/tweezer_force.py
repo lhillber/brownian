@@ -374,8 +374,7 @@ class Tweezers:
             beam : ott.BscPmGauss object
                 A laser beam for scattering calculations
         """
-        NA = self.params["wavelength0"] / (np.pi * waist)
-        print(NA)
+        NA = self.params["n_medium"] * self.params["wavelength0"] / (np.pi * waist)
         params_in = {"waist": waist,
                      "polarization": polarization,
                      "angle": angle}
@@ -385,7 +384,8 @@ class Tweezers:
                           'NA', NA,
                           'polarisation', matlab.double(polarization),
                           'index_medium', self.params["n_medium"],
-                          'wavelength0', self.params["wavelength0"])
+                          'wavelength0', self.params["wavelength0"],
+                          'angular_scaling', "sintheta")
         if angle > 0.0:
             beam = self.eng.rotate(beam, matlab.double(Xrot(angle).tolist()))
         self.beams[name] = beam
@@ -495,7 +495,7 @@ class Tweezers:
                 interpolated force.
 
             domain : Domain object
-                A Domain object over which to evaluate the interpolated forcd.
+                A Domain object over which to evaluate the interpolated force.
                 If points is not None, this arument is ignored.
 
             name : str, optional
