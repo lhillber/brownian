@@ -16,6 +16,34 @@ nm = units["nm"]["value"]
 mW = units["mW"]["value"]
 fN = units["fN"]["value"]
 
+def upsample(domain, factor):
+    """
+    Increase the density of points in a domain.
+
+        Parameters
+        ----------
+            domain : Dommain object
+                The domain to be upsampled
+
+            factor : int or float
+                The factor by which to increase the domain's resolution
+
+        Returns
+        -------
+            domain : Domain object
+                The upsampled domain.
+    """
+    if domain.spec == "number":
+        [[x0, x1, Nx], [y0, y1, Ny], [z0, z1, Nz]] = domain.meshspec
+        return Domain(meshspec=[[x0, x1, int(Nx*factor)],
+                                [y0, y1, int(Ny*factor)],
+                                [z0, z1, int(Nz*factor)]], spec="number")
+    elif domain.spec == "delta":
+        [[x0, x1, dx], [y0, y1, dy], [z0, z1, dz]] = domain.meshspec
+        return Domain(meshspec=[[x0, x1, dx/factor],
+                                [y0, y1, dy/factor],
+                                [z0, z1, dz/factor]], spec="delta")
+
 class Domain:
     """
     Define a 3D rectangular grid domain.
@@ -72,12 +100,15 @@ class Domain:
         """
 
         if spec == "number":
-            axes = [np.linspace(*min_max_spec) for min_max_spec in meshspec]
+            axes = [np.linspace(min_max_spec[0],
+                                min_max_spec[1],
+                                int(min_max_spec[2])) for
+                                min_max_spec in meshspec]
         elif spec == "delta":
             for min_max_spec in meshspec:
                 min_max_spec[1] = min_max_spec[1] + min_max_spec[2]
             axes = [np.arange(*min_max_spec) for min_max_spec in meshspec]
-
+        self.spec = spec
         self.meshspec = meshspec
         self.bounds = [(minmaxspec[0], minmaxspec[1]) for minmaxspec in meshspec]
         self.axes = axes
@@ -216,7 +247,8 @@ class Tweezers:
                  eng=None,
                  wavelength0=1064*nm,
                  n_medium=1.0,
-                 c=3.0e8):
+                 c=299_792_458.0
+                 ):
         """
         Initialize an instance of the Tweezer class.
 
@@ -231,7 +263,7 @@ class Tweezers:
                 Refractive index of the medium. Default is 1.0 (air).
 
             c : float, optional
-                Speed of ligth; sets OTT units. Default is 3.0e8 m/s.
+                Speed of ligth; sets OTT units. Default is 299 792 458 m/s.
 
         Returns
         -------
@@ -456,7 +488,7 @@ class Tweezers:
         return FXYZ
 
 
-    def make_interpolation(self, name):
+    def make_interpolation(self, name, power=1):
         """
         Perform a linear interpolation on the 3-compnent force field arrays
         evaluated over the domain. Each call will add the name and list of
@@ -477,7 +509,10 @@ class Tweezers:
                 named force field.
 
         """
-        interps = self.domain.vector_interpolation(self.FXYZs[name])
+        if name == "net":
+            interps = self.domain.vector_interpolation(self.FXYZs[name])
+        else:
+            interps = self.domain.vector_interpolation(power * self.FXYZs[name])
         self.interps[name] = interps
         return interps
 
@@ -554,6 +589,7 @@ class Tweezers:
         points = domain.points
 
         F = self.interpolate_force(points=points, name=name)
+
         Fmagnitude = np.sum(F*F, axis=1)
         mask = Fmagnitude > 0
         mindex = np.argmin(Fmagnitude[mask])
@@ -786,7 +822,7 @@ class Tweezers:
         xyz = domain.axes
         cshape = domain.coordinate_shape
         interps = self.interps[name]
-        vars_inds_dict = {0: [2, 1], 1: [2, 0], 2: [0, 1]}
+        vars_inds_dict = {0: [2, 1], 1: [2, 0], 2: [1, 0]}
         const_inds = ["xyz".index(k) for k in planes.keys()]
         vars_inds = [vars_inds_dict[c] for c in const_inds]
 
@@ -837,7 +873,7 @@ class Tweezers:
                     )
 
                 if contours and label_contours:
-                    cl_kwargs = dict(inline=1, fontsize=11, fmt="%1.2f")
+                    cl_kwargs = dict(inline=1, fmt="%1.2f")
                     cl_kwargs.update(clabel_kwargs)
                     ax.clabel(cp, **cl_kwargs)
 
@@ -846,15 +882,16 @@ class Tweezers:
                                     lw=0.5,
                                     color="k")
                     q_kwargs.update(quiver_kwargs)
+                    print(q_kwargs)
                     ax.quiver(
-                        X[::skip, ::skip]/unit["value"],
-                        Y[::skip, ::skip]/unit["value"],
-                        VX[::skip, ::skip]/Funit["value"],
-                        VY[::skip, ::skip]/Funit["value"],
+                        X[skip//2::skip, skip//2::skip]/unit["value"],
+                        Y[skip//2::skip, skip//2::skip]/unit["value"],
+                        VX[skip//2::skip, skip//2::skip]/Funit["value"],
+                        VY[skip//2::skip, skip//2::skip]/Funit["value"],
                         **q_kwargs
                     )
 
-                ax.set_title(r"$%s = %.2f~(\rm %s)$" % (
+                ax.set_title(r"$%s = %.2f~\rm %s$" % (
                     "xyz"[const_ind], const_val/unit["value"], unit["label"]))
                 ax.set_xlabel("xyz"[vars_inds[0]]+r"$~(\rm %s)$" % unit["label"])
                 if j == 0:
@@ -979,7 +1016,7 @@ class Tweezers:
         ax.plot(vars/unit["value"], interp(points)/Funit["value"], **p_kwargs)
         ax.axhline(0, lw=1, c="k")
         if show_legend:
-            ax.legend(fontsize=10)
+            ax.legend()
         ax.set_ylabel(ylabel)
         ax.set_xlabel(xlabel)
         return fig, ax

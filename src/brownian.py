@@ -129,8 +129,8 @@ def get_mass(R, density):
 def get_gamma(R, viscosity):
     return 6 * np.pi * viscosity * R
 
-def get_params_from_abcRT(a, b, c, R, T):
-    eta = get_viscosity(T)
+def get_params_from_abcRT(a, b, c, R, T, RH=50):
+    eta = get_viscosity(T, RH=RH)
     d2 = b + 2 * np.sqrt(a*c)
     k = 12 * np.pi**2 * eta * R * np.sqrt(a/d2)
     rho = 9 * eta / (4*np.pi*R**2) * np.sqrt(c/d2)
@@ -257,45 +257,51 @@ def PSD(xs, dt, taumax=None, tmin=None, tmax=None, detrend="linear", window="han
     return freq, psdavg, Navg
 
 
-def AVAR(xs, dt, func=np.mean, octave=True):
+def AVAR(xs, dt, func=np.mean, octave=True, base=2, Nmin=20):
     """Allan Variance"""
     if octave:
-        Npts_list = np.array([2**m for m in range(1, int(np.log2(xs.size/2)))])
+        Npts_list = np.array([base**m for m in range(1, int(np.log2(xs.size/base)/np.log2(base)))])
     else:
-        Npts_list = np.arange(2, int(xs.size/2))
-
+        Npts_list = np.arange(Nmin, int(xs.size/2), Nmin)
+    Npts_list = Npts_list[Npts_list>=Nmin]
     taus = dt * Npts_list
     avars = np.zeros_like(taus)
     davars = np.zeros_like(taus)
     for j, tau in enumerate(taus):
         xparts = partition(xs, dt, taumax=tau)
-        vals = func(xparts, axis=1)
+        try:
+            vals = func(xparts, axis=1)
+        except TypeError:
+            vals = np.array([func(xp) for xp in xparts])
         avars[j] = np.mean((vals[1:] - vals[:-1])**2) / 2
         davars[j] = np.var(vals)
     Navg = 1
     return taus, avars, Navg
 
 
-def NVAR(xs, dt, func=np.mean, octave=True):
+def NVAR(xs, dt, func=np.mean, octave=True, base=2, Nmin=20):
     """Normal variance"""
     if octave:
-        Npts_list = np.array([2**m for m in range(0, int(np.log2(xs.size/2)))])
+        Npts_list = np.array([base**m for m in range(1, int(np.log2(xs.size/base)/np.log2(base)))])
     else:
-        Npts_list = np.arange(2, int(xs.size/2))
-
+        Npts_list = np.arange(Nmin, int(xs.size/2), Nmin)
+    Npts_list = Npts_list[Npts_list>=Nmin]
     taus = dt * Npts_list
     nvars = np.zeros_like(taus)
     dnvars = np.zeros_like(taus)
     m = np.mean(xs)
     for j, tau in enumerate(taus):
         xparts = partition(xs, dt=dt, taumax=tau)
-        vals = np.array([func(x) for x in xparts])
-        nvars[j] = np.mean((vals - m)**2)
+        try:
+            vals = func(xparts, axis=1)
+        except TypeError:
+            vals = np.array([func(xp) for xp in xparts])
+        nvars[j] = np.mean((vals - m)**2)/2
         dnvars[j] = np.var(vals)
     Navg = 1
     return taus, nvars, Navg
 
-def HIST(xs, dt, taumax=None, lb=None, ub=None, Nbins=45, density=True):
+def HIST(xs, dt, taumax=None, lb=None, ub=None, Nbins=45, density=True, remove_mean=False):
     xpart = partition(xs, dt, taumax)
     Navg = len(xpart)
     histavg = 0
@@ -305,7 +311,11 @@ def HIST(xs, dt, taumax=None, lb=None, ub=None, Nbins=45, density=True):
         ub = xs.max()
     bins = np.linspace(lb, ub, Nbins, endpoint=True)
     for xp in xpart:
-        hist, edges = np.histogram(xp, bins=bins, density=density)
+        if remove_mean:
+            xpprime = xp - np.mean(xp)
+        else:
+            xpprime = xp
+        hist, edges = np.histogram(xpprime, bins=bins, density=density)
         histavg += hist / Navg
     bins = edges[:-1] + np.diff(edges) / 2
     return bins, histavg, Navg
@@ -383,9 +393,9 @@ def get_Smat(freq, psd):
     return Smat, Sinvmat, Svec
 
 
-def get_krhoA(a, b, c, R, T, eta=None, **kwargs):
+def get_krhoA(a, b, c, R, T, eta=None, RH=50, **kwargs):
     if eta is None:
-        eta = get_viscosity(T)
+        eta = get_viscosity(T, RH=RH)
     d2 = b + 2 * np.sqrt(a*c)
     k = 12 * np.pi**2 * eta * R * np.sqrt(a/d2)
     rho = 9 * eta / (4*np.pi*R**2) * np.sqrt(c/d2)
@@ -393,6 +403,48 @@ def get_krhoA(a, b, c, R, T, eta=None, **kwargs):
     A = np.sqrt(Ainv2)
     return k, rho, A
 
+def get_jac_krhoA(a, b, c, R, T, RH=50):
+    """Jacobian of physical parameters w.r.t fitting parameters"""
+    eta = get_viscosity(T, RH=RH)
+    d1 = b + np.sqrt(a*c)
+    d2 = b + 2 * np.sqrt(a*c)
+    cof = 6 * np.pi**2 * eta * R / np.sqrt(a*d2**3)
+    u1 = 3 / (16 * np.pi**3 * R**3)
+    u2 = 1 / (2 * np.sqrt(6 * np.pi * eta * R * kB * T))
+    jac = np.array([
+    [d1, -a, -np.sqrt(a**3/c), 2*a*d2/R, 2*a*d2/eta, 0],
+    [-u1*c, -u1*np.sqrt(a*c), u1*d1*np.sqrt(a/c),
+        -4*u1*d2*np.sqrt(a*c)/R, 2*u1*d2*np.sqrt(a*c)/eta, 0],
+     [-u2*np.sqrt(c), -u2*np.sqrt(a), -u2*a/np.sqrt(c),
+        u2*d2*np.sqrt(a)/R, u2*d2*np.sqrt(a)/eta, -u2*d2*np.sqrt(a)/T]])
+    return cof * jac
+
+def get_m123(a, b, c, R, xvar, vvar, T, RH=50):
+    """3 mass calculations from fitting parameters and variances"""
+    eta = get_viscosity(T, RH=RH)
+    d2 = b + 2 * np.sqrt(a*c)
+    m1 = 3*eta*R * np.sqrt(c / d2)
+    m2 = 6*np.pi**3*eta*R / (d2 * vvar)
+    m3 = 12*np.pi**2*eta*R * np.sqrt(a/d2) * xvar/vvar
+    return m1, m2, m3
+
+def get_jac_m123(a, b, c, R, xvar, vvar, T, RH=50):
+    """Jacobian of mass calculations"""
+    eta = get_viscosity(T, RH=RH)
+    d2 = b + 2 * np.sqrt(a*c)
+    d1 = b + np.sqrt(a*c)
+    cof = 6 * np.pi**2 * eta * R / np.sqrt(a*d2**3)
+    v1 = 1 / (4*np.pi**2)
+    v2 = np.pi / vvar
+    v3 = xvar / vvar
+    jac = np.array([
+        [-v1*c, -v1*np.sqrt(a*c), v1*d1*np.sqrt(a/c), 0, 0,
+            2*v1*d2*np.sqrt(a*c)/R, 2*v1*d2*np.sqrt(a*c)/eta],
+         [-v2*np.sqrt(c / d2), -v2*np.sqrt(a / d2), -v2*a/np.sqrt(c*d2),
+            -v2*np.sqrt(a*d2)/vvar, 0, v2*np.sqrt(a*d2)/R, v2*np.sqrt(a*d2)/eta],
+         [v3*d1, -v3*a, -v3*np.sqrt(a**3/c), -2*v3*a*d2/vvar, 2*v3*a*d2/xvar,
+            2*v3*a*d2/R, 2*v3*a*d2/eta] ])
+    return cof * jac
 
 def abc_guess(freq, psd, n=1):
     Smat, Sinvmat, Svec = get_Smat(freq, psd)
@@ -409,9 +461,9 @@ def psd_abc_func(f, a, b, c, **kwargs):
     return 1 / np.abs((a + b * f ** 2 + c * f ** 4))
 
 
-def psd_func(f, k, rho, T, R, eta=None, **kwargs):
+def psd_func(f, k, rho, T, R, eta=None, RH=50, **kwargs):
     if eta is None:
-        eta = get_viscosity(T)
+        eta = get_viscosity(T, RH=RH)
     m = 4*np.pi*rho*R**3/3
     gamma = 6*np.pi*eta*R
     omega = 2*np.pi * f
@@ -419,9 +471,9 @@ def psd_func(f, k, rho, T, R, eta=None, **kwargs):
     return 4 * kB * T * gamma / denom
 
 
-def msd_func(t, k, rho, T, R, eta=None, **kwargs):
+def msd_func(t, k, rho, T, R, eta=None, RH=50, **kwargs):
     if eta is None:
-        eta = get_viscosity(T)
+        eta = get_viscosity(T, RH=50)
     m = 4*np.pi*rho*R**3/3
     gamma = 6*np.pi*eta*R
     Omega = np.sqrt(k / m)
@@ -433,9 +485,9 @@ def msd_func(t, k, rho, T, R, eta=None, **kwargs):
     return 2*kB*T/k * (1 - cs * np.exp(-t/(2*taup)))
 
 
-def pac_func(t, k, rho, T, R, eta=None, **kwargs):
+def pac_func(t, k, rho, T, R, eta=None, RH=50, **kwargs):
     if eta is None:
-        eta = get_viscosity(T)
+        eta = get_viscosity(T, RH)
     m = 4*np.pi*rho*R**3/3
     gamma = 6*np.pi*eta*R
     Omega = np.sqrt(k / m)
@@ -447,9 +499,9 @@ def pac_func(t, k, rho, T, R, eta=None, **kwargs):
     return kB*T/k * cs * np.exp(-t/(2*taup))
 
 
-def vac_func(t, k, rho, T, R, eta=None, **kwargs):
+def vac_func(t, k, rho, T, R, eta=None, RH=50, **kwargs):
     if eta is None:
-        eta = get_viscosity(T)
+        eta = get_viscosity(T, RH=RH)
     m = 4*np.pi*rho*R**3/3
     gamma = 6*np.pi*eta*R
     Omega = np.sqrt(k / m)

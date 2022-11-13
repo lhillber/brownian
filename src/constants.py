@@ -13,12 +13,12 @@ units = {
 
           "m": {"value": 1.0, "label": "m"},
          "mm": {"value": milli, "label": "mm"},
-         "um": {"value": micro, "label": "\mu m"},
+         "um": {"value": micro, "label": r"\upmu m"},
          "nm": {"value": nano, "label": "nm"},
 
           "s": {"value": 1.0, "label": "s"},
          "ms": {"value": milli, "label": "ms"},
-         "us": {"value": micro, "label": "\mu s"},
+         "us": {"value": micro, "label": r"\upmu s"},
          "ns": {"value": nano, "label": "ns"},
 
 

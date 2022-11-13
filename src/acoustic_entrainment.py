@@ -29,7 +29,7 @@ def muflown_response(f):
 
 def mic_sensitivity_interp (lfs, fs, dBs):
     sensitivity = lfs*10**(dBs/20)
-    interp = interp1d(fs, sensitivity, fill_value="extrapolate")
+    interp = interp1d(fs, sensitivity, kind="cubic", fill_value="extrapolate")
     return interp
 
 
@@ -57,7 +57,7 @@ free_field_0deg_no_grid_dBs = np.array([
 
 
 def mic_response_pressure(f, lfs=0.68*1e-3):
-    return mic_sensitivity_interp(lfs=lfs)(f, fs=fs_orig, dBs=dBs_orig)
+    return mic_sensitivity_interp(lfs=lfs, fs=fs_orig, dBs=dBs_orig)(f)
 
 
 def mic_response(f, lfs=0.68*1e-3):
@@ -67,7 +67,7 @@ def mic_response(f, lfs=0.68*1e-3):
             dBs=dBs_orig+free_field_0deg_no_grid_dBs)(f)
 
 class VelocityResponse:
-    def __init__(self, sensitivity, R, rho, T, RH=0, k=0, c0=None, rho_fluid=None, mu=None):
+    def __init__(self, sensitivity, R, rho, T, k=0, RH=0, c0=None, rho_fluid=None, mu=None):
         self.sensitivity = sensitivity
         self.R = R
         self.k = k

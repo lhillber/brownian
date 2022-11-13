@@ -112,6 +112,55 @@ def firstdiff(tx, acc=8, r=None, t=None):
     return tv, v
 
 
+def parse_fname(fname):
+    """
+    Returns dictionary of parameters encoded in file name.
+    Assumes structure:
+    der/<name1>-<unit1><val1>_<name2>-<unit2><val2>_<note1>_<note2>/trial_v<version>.txt
+    No numbers are allowed in the name, unit, or note fields
+    """
+    params = {}
+    if ".dat" in fname:
+        der, trial = os.path.split(fname)
+        trial = trial.split("_v")[1]
+        trial = int(trial.split(".dat")[0])
+        params["trial"] = trial
+    else:
+        der = fname
+    day, der = os.path.split(der)
+    day = os.path.split(day)[1].split("_")[0]
+    name = os.path.basename(der)
+    notes = []
+    nsplit = name.split("_")
+    for puv in nsplit:
+        for i, c in enumerate(puv):
+            if c.isdigit():
+                break
+        if i == len(puv) - 1:
+            notes.append(puv)
+        else:
+            params[puv[:i]] = float(puv[i:])
+    params["notes"] = notes
+    params["day"] = day
+    return params
+
+def load_weighing(fname, norm="Det-V"):
+    params = parse_fname(fname)
+    if norm is None:
+        norm = 1
+    if type(norm) == str:
+        try:
+            norm = self.params[norm]
+        except:
+            print(f"No param {norm}.")
+            norm = 1.0
+    x = np.fromfile(fname, dtype=">d")
+    x -= np.mean(x)
+    x /= norm
+    x = np.array(x, dtype=np.float32)
+    return x, params
+
+
 # Object-oriented interfaces
 # ==========================
 
@@ -152,7 +201,13 @@ class TimeSeries:
         if inplace:
             self.x = x2
         return x2
-        self.x = cal*x2
+
+    def delay(self, t0, inplace=False):
+        t2 = self.t - t0
+        if inplace:
+            self.t = t2
+        return t2
+
 
     def bin_func(self, Npts, func=np.mean, inplace=False):
         if Npts in (1, None):
@@ -262,15 +317,15 @@ class TimeSeries:
         self.Navg_msd = Navg
         return tmsd, msd, Navg
 
-    def AVAR(self, func=np.mean, octave=True):
+    def AVAR(self, func=np.mean, octave=True, Nmin=20, base=2):
         """ Alan variance """
-        tavar, avar, Navg = AVAR(self.x, 1/self.r, func=func, octave=octave)
+        tavar, avar, Navg = AVAR(self.x, 1/self.r, func=func, octave=octave, Nmin=Nmin, base=base)
         self.tavar = tavar
         self.avar = avar
         self.Navg_avar = Navg
         return tavar, avar, Navg
 
-    def NVAR(self, func=np.mean, octave=True):
+    def NVAR(self, func=np.mean, octave=True, base=2, Nmin=20):
         """ Normal variance """
         tnvar, nvar, Navg = NVAR(self.x, 1/self.r, func=func, octave=octave)
         self.tnvar = tnvar
@@ -278,14 +333,15 @@ class TimeSeries:
         self.Navg_nvar = Navg
         return tnvar, nvar, Navg
 
-    def HIST(self, taumax=None, Nbins=45, density=True):
-        bins, hist, Navg = HIST(self.x, 1/self.r, Nbins=Nbins, taumax=taumax, density=density)
+    def HIST(self, taumax=None, lb=None, ub=None, Nbins=45, density=True, remove_mean=False):
+        bins, hist, Navg = HIST(self.x, 1/self.r, lb=lb, ub=ub, Nbins=Nbins, taumax=taumax, density=density, remove_mean=remove_mean)
         self.bins = bins
         self.hist = hist
         self.Navg_hist = Navg
         return bins, hist, Navg
 
-    def plot(self, tmin=None, tmax=None, ax=None, figsize=(9,4), unit="V", tunit="s",
+    def plot(self, tmin=None, tmax=None, vshift=0, tshift=0,
+            ax=None, figsize=(9,4), unit="V", tunit="s",
              return_data=False, **kwargs):
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=figsize)
@@ -300,7 +356,7 @@ class TimeSeries:
         elif type(tunit) in (float, int):
             tunit = {"value":tunit, "label":""}
         t, x = self.time_gate(tmin=tmin, tmax=tmax)
-        ax.plot(t/tunit["value"], x/unit["value"], **kwargs)
+        ax.plot(tshift+t/tunit["value"], vshift+x/unit["value"], **kwargs)
         ax.set_ylabel(r"%s ($\rm %s$)" % (self.name, unit["label"]))
         ax.set_xlabel(r"Time ($\rm %s$)" % tunit['label'])
         if return_data:
@@ -320,12 +376,13 @@ class Collection:
         self.colletion_name = "Collection channel is not set!"
         self.collection = []
 
+
     @property
     def Nrecords(self):
         return len(self.t0)
 
     def __getattr__(self, attr):
-        if attr[-1] == "s" and attr not in ("pos", "fos"):
+        if attr[-1] == "s" and attr not in ("pos", "fos", "tdms"):
             return np.array([getattr(self, attr[:-1]+f"_{idx}") for idx in range(self.Nrecords)])
         try:
             return self.tdms_file[attr]
@@ -334,7 +391,6 @@ class Collection:
                 return self.params[attr]
             except KeyError:
                 print(f"No property or channel '{attr}'")
-
 
     @property
     def params(self):
@@ -366,7 +422,6 @@ class Collection:
             name = name.upper()
         else:
             r = self.params['r2']
-
         Cs = [TimeSeries(C, r=r, name=name) for C in getattr(self, name+"s")]
         self.collection = Cs
         self.collection_name = name
@@ -393,9 +448,10 @@ class Collection:
         if type(collection_slice) == int:
             collection_slice = slice(collection_slice, self.Nrecords, 1)
         agg = 0
-        for C in self.collection[collection_slice]:
+        Cs = self.collection[collection_slice]
+        for C in Cs:
             t, x = C()
-            agg += x / self.Nrecords
+            agg += x / len(Cs)
         agg = agg
         self.agg = TimeSeries((t, agg), name=f"{self.collection_name}_aggrigate")
         return t, agg
@@ -414,3 +470,32 @@ class Collection:
         ret = Parallel(n_jobs=n_jobs)(delayed(workload)(C) for C in self.collection)
         if recollect:
             self.collection = ret
+
+
+class CollectionWeighing(Collection):
+    def __init__(self, fnames, norm=1):
+        self.fnames = fnames
+        self.collection_name = "X"
+        self.trials = []
+        self.collection = []
+        for fname in fnames:
+            x, params = load_weighing(fname, norm=norm)
+            r = params["r-Sps"]
+            self.trials.append(params["trial"])
+            self.collection.append(TimeSeries(x, r=r, name="X"))
+        del params["trial"]
+        self._params = params
+
+    @property
+    def Nrecords(self):
+        return len(self.trials)
+
+    def __getattr__(self, attr):
+        try:
+            return self.params[attr]
+        except KeyError:
+            print(f"No property or channel '{attr}'")
+
+    @property
+    def params(self):
+        return self._params
