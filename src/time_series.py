@@ -25,11 +25,11 @@ from brownian import (
 # File I/O
 # ========
 
-def find_files(der):
-    """Return the full path to all files in directory der."""
+def find_files(inder):
+    """Return the full path to all files in directory inder."""
     files = []
     # r=root, d=directories, f = files
-    for r, d, f in os.walk(der):
+    for r, d, f in os.walk(inder):
         for file in f:
             files.append(os.path.join(r, file))
     return files
@@ -45,24 +45,6 @@ def find_ders(inder):
                 ders.append(os.path.join(r, der))
 
     return ders
-
-
-def multipage(fname, figs=None, clf=True, dpi=300, clip=True, extra_artist=False):
-    """Save multi-page PDFs"""
-    pp = PdfPages(fname)
-    if figs is None:
-        figs = [plt.figure(fignum) for fignum in plt.get_fignums()]
-    for fig in figs:
-        if clip is True:
-            fig.savefig(
-                pp, format="pdf", bbox_inches="tight", bbox_extra_artist=extra_artist
-            )
-        else:
-            fig.savefig(pp, format="pdf", bbox_extra_artist=extra_artist)
-        if clf == True:
-            fig.clf()
-
-    pp.close()
 
 
 # Helper functions
@@ -231,6 +213,7 @@ class TimeSeries:
             self.x = x2
         return self.t, x2
 
+
     def filter(self, cutoff, order=3, btype="lowpass", inplace=False):
         if cutoff in (None, "inf"):
             return self.t, self.x
@@ -239,6 +222,11 @@ class TimeSeries:
         if inplace:
             self.x = x2
         return self.t, x2
+
+
+    def lowpass(self, cutoff, order=3, inplace=False):
+        return self.filter(cutoff=cutoff, order=order, btype="lowpass", inplace=inplace)
+
 
     def time_gate(self, tmin=None, tmax=None, inplace=False):
         if tmin is None:
@@ -252,6 +240,7 @@ class TimeSeries:
             self.x = x2
             self.t = t2
         return t2, x2
+
 
     def correct(self, response, tmin=None, tmax=None,
         window="boxcar", differentiate=False, name=None):
@@ -275,14 +264,12 @@ class TimeSeries:
         D = TimeSeries(corrected_signal, t, name=name)
         return D
 
+
     def shift(self, tau, inplace=False):
         t2 = self.t - tau
         if inplace:
             self.t = t2
         return t2, self.x
-
-    def lowpass(self, cutoff, order=3, inplace=False):
-        return self.filter(cutoff=cutoff, order=order, btype="lowpass", inplace=inplace)
 
 
     def differentiate(self, inplace=False):
@@ -293,6 +280,7 @@ class TimeSeries:
             self.name = "d_dt"+self.name
         return t2, x2
 
+
     def PSD(self, taumax=None, tmin=None, tmax=None, detrend="linear", window="hann", noverlap=None):
         """ Power spectral density """
         freq, psd, Navg = PSD(self.x, 1/self.r, taumax=taumax, tmin=tmin, tmax=tmax, detrend=detrend, window=window, noverlap=noverlap)
@@ -300,6 +288,7 @@ class TimeSeries:
         self.psd = psd
         self.Navg_psd = Navg
         return freq, psd, Navg
+
 
     def ACF(self, taumax=None, n_jobs=1):
         """ Autocorrelation function """
@@ -309,6 +298,7 @@ class TimeSeries:
         self.Navg_acf = Navg
         return tacf, acf, Navg
 
+
     def MSD(self, taumax=None, n_jobs=1):
         """ Mean-squared displacement """
         tmsd, msd, Navg = MSD(self.x, 1/self.r, taumax=taumax, n_jobs=n_jobs)
@@ -316,6 +306,7 @@ class TimeSeries:
         self.msd = msd
         self.Navg_msd = Navg
         return tmsd, msd, Navg
+
 
     def AVAR(self, func=np.mean, octave=True, Nmin=20, base=2):
         """ Alan variance """
@@ -325,6 +316,7 @@ class TimeSeries:
         self.Navg_avar = Navg
         return tavar, avar, Navg
 
+
     def NVAR(self, func=np.mean, octave=True, base=2, Nmin=20):
         """ Normal variance """
         tnvar, nvar, Navg = NVAR(self.x, 1/self.r, func=func, octave=octave)
@@ -333,12 +325,14 @@ class TimeSeries:
         self.Navg_nvar = Navg
         return tnvar, nvar, Navg
 
+
     def HIST(self, taumax=None, lb=None, ub=None, Nbins=45, density=True, remove_mean=False):
         bins, hist, Navg = HIST(self.x, 1/self.r, lb=lb, ub=ub, Nbins=Nbins, taumax=taumax, density=density, remove_mean=remove_mean)
         self.bins = bins
         self.hist = hist
         self.Navg_hist = Navg
         return bins, hist, Navg
+
 
     def plot(self, tmin=None, tmax=None, vshift=0, tshift=0,
             ax=None, figsize=(9,4), unit="V", tunit="s",
@@ -366,43 +360,17 @@ class TimeSeries:
 
 
 class Collection:
-    def __init__(self, fname):
-        tdms_file = TdmsFile(fname)["main"]
-        t0 = tdms_file["t0"][:]
-        t0 -= t0[0]
-        t0 /= 1e6
-        self.tdms_file = tdms_file
-        self.t0 = t0
-        self.colletion_name = "Collection channel is not set!"
-        self.collection = []
-
+    def __init__(self, timeseries_list):
+        self.collection = timeseries_list
+        r = self.collection[0].r
+        size = self.collection[0].size
+        same_r = np.all([D.r == r for D in self.collection])
+        same_size = np.all([D.sixe == size for D in self.collection])
+        assert same_r and same_size
 
     @property
     def Nrecords(self):
-        return len(self.t0)
-
-    def __getattr__(self, attr):
-        if attr[-1] == "s" and attr not in ("pos", "fos", "tdms"):
-            return np.array([getattr(self, attr[:-1]+f"_{idx}") for idx in range(self.Nrecords)])
-        try:
-            return self.tdms_file[attr]
-        except KeyError:
-            try:
-                return self.params[attr]
-            except KeyError:
-                print(f"No property or channel '{attr}'")
-
-    @property
-    def params(self):
-        return self.tdms_file.properties
-
-    @property
-    def available_channels(self):
-        return [str(ch).split("/")[-1][1:-2] for ch in self.tdms_file.channels()]
-
-    @property
-    def channels(self):
-        return sorted(list(set([ch.split("_")[0] for ch in self.available_channels])))
+        return len(self.collection)
 
     @property
     def r(self):
@@ -415,16 +383,6 @@ class Collection:
     @property
     def t(self):
         return self.collection[-1].t
-
-    def set_collection(self, name="x"):
-        if name[-1].upper() in ("X", "Y"):
-            r = self.params['r']
-            name = name.upper()
-        else:
-            r = self.params['r2']
-        Cs = [TimeSeries(C, r=r, name=name) for C in getattr(self, name+"s")]
-        self.collection = Cs
-        self.collection_name = name
 
 
     def average(self, method_str, n_jobs=1, **kwargs):
@@ -463,6 +421,7 @@ class Collection:
         Cs = Parallel(n_jobs=n_jobs)(delayed(workload)(C) for C in self.collection)
         self.collection = Cs
 
+
     def apply(self, method_str, n_jobs=1, recollect=False, **kwargs):
         def workload(timeseries):
             func = getattr(timeseries, method_str)(**kwargs)
@@ -470,6 +429,104 @@ class Collection:
         ret = Parallel(n_jobs=n_jobs)(delayed(workload)(C) for C in self.collection)
         if recollect:
             self.collection = ret
+
+class CollectionTDMS_bak(Collection):
+    def __init__(self, fname):
+        tdms_file = TdmsFile(fname)["main"]
+        try:
+            t0 = tdms_file["t0"][:]
+        except:
+            t0 = tdms_file["Untitled"][:]
+        t0 -= t0[0]
+        t0 /= 1e6
+        self.tdms_file = tdms_file
+        self.t0 = t0
+        self.colletion_name = "Collection channel is not set!"
+        self.collection = []
+
+    def __getattr__(self, attr):
+        if attr[-1] == "s" and attr not in ("pos", "fos", "tdms"):
+            Navailable = 1 + int(max([ch.split("_")[1] if len(ch.split("_"))>1 else 0 for
+                                        ch in self.available_channels], key=int))
+            return np.array([getattr(self, attr[:-1]+f"_{idx}") for idx in range(Navailable)])
+        try:
+            return self.tdms_file[attr]
+        except KeyError:
+            try:
+                return self.params[attr]
+            except KeyError:
+                print(f"No property or channel '{attr}'")
+
+    @property
+    def params(self):
+        return self.tdms_file.properties
+
+    @property
+    def available_channels(self):
+        return [str(ch).split("/")[-1][1:-2] for ch in self.tdms_file.channels()]
+
+    @property
+    def channels(self):
+        return sorted(list(set([ch.split("_")[0] for ch in self.available_channels])))
+
+    def set_collection(self, name="x"):
+        if name[-1].upper() in ("X", "Y"):
+            r = self.params['r']
+            name = name.upper()
+        else:
+            r = self.params['r2']
+        Cs = [TimeSeries(C, r=r, name=name) for C in getattr(self, name+"s")]
+        self.collection = Cs
+        self.collection_name = name
+
+
+class CollectionTDMS(Collection):
+    def __init__(self, fname):
+        self.fname = fname
+        with TdmsFile.open(self.fname) as tdms_file:
+            try:
+                t0 = tdms_file["main"]["t0"][:]
+            except:
+                t0 = tdms_file["main"]["Untitled"][:]
+            t0 -= t0[0]
+            t0 /= 1e6
+            self.params = tdms_file["main"].properties
+
+            self.t0 = t0
+            self.colletion_name = "Collection channel is not set!"
+            self.collection = []
+
+    def __getattr__(self, attr):
+        try:
+            return self.params[attr]
+        except:
+            with TdmsFile.open(self.fname) as tdms_file:
+                return tdms_file["main"][attr][:]
+
+    def set_collection(self, name="x", tmin=None, tmax=None):
+        r = self.params['r']
+        if tmin is None:
+            lb = 0
+        else:
+            lb = int(tmin*r)
+        if tmax is None:
+            ub = -1
+        else:
+            ub = int(tmax*r)
+        name = name.upper()
+        with TdmsFile.open(self.fname) as tdms_file:
+            available_channels = [str(ch).split("/")[-1][1:-2]
+                for ch in tdms_file["main"].channels()]
+            Navailable = 1 + int(max([ch.split("_")[1]
+                        if len(ch.split("_"))>1 else 0 for
+                        ch in available_channels], key=int))
+
+            Cs = []
+            for trial in range(Navailable):
+                channel = tdms_file["main"][f"{name.upper()}_{trial}"]
+                Cs.append(TimeSeries(channel[lb:ub], r=r, name=name))
+        self.collection = Cs
+        self.collection_name = name
 
 
 class CollectionWeighing(Collection):

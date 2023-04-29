@@ -126,10 +126,21 @@ def get_sound_speed(T, RH=0, p=101325, xCo2=0):
 def get_mass(R, density):
     return 4/3 * np.pi * density * R**3
 
+def get_spring_constant(m, w0):
+    return m * w0*w0
+
+
+def get_resonance(m, k):
+    return np.sqrt(k / m)
+
+
 def get_gamma(R, viscosity):
     return 6 * np.pi * viscosity * R
 
+
 def get_params_from_abcRT(a, b, c, R, T, RH=50):
+    if T <= 273.15:
+        T = T + 273.15
     eta = get_viscosity(T, RH=RH)
     d2 = b + 2 * np.sqrt(a*c)
     k = 12 * np.pi**2 * eta * R * np.sqrt(a/d2)
@@ -140,7 +151,7 @@ def get_params_from_abcRT(a, b, c, R, T, RH=50):
     gamma = get_gamma(R, eta)
     taup = m / gamma
     w0 = np.sqrt(k/m)
-    return {"a":a, "b":b, "c":c, "R":R, "Tavg":T, "k": k, "rho": rho, "cal": cal, "m": m, "gamma": gamma, "taup": taup, "w0": w0}
+    return {"a":a, "b":b, "c":c, "R":R, "k": k, "rho": rho, "cal": cal, "m": m, "gamma": gamma, "taup": taup, "w0": w0}
 
 def setup(m, gamma, k, T, dt):
     D = kB * T / gamma
@@ -464,6 +475,8 @@ def psd_abc_func(f, a, b, c, **kwargs):
 def psd_func(f, k, rho, T, R, eta=None, RH=50, **kwargs):
     if eta is None:
         eta = get_viscosity(T, RH=RH)
+    if T <= 2773.15:
+        T = T+273.15
     m = 4*np.pi*rho*R**3/3
     gamma = 6*np.pi*eta*R
     omega = 2*np.pi * f
@@ -519,6 +532,71 @@ def msd_from_pacf(pacf, T, k, **kwargs):
 
 def pacf_from_msd(msd, T, k, **kwargs):
     return (kB * T / k) - msd/2
+
+class System:
+    def __init__(self, params):
+        self.params = params
+
+    def __getattr__(self, attr):
+        return self.params[attr]
+
+    def __call__(self):
+        keys = ("k", "rho", "m", "gamma", "Gamma", "w0", "taup")
+        return self.params | {k:getattr(self, k) for k in keys}
+
+    @property
+    def RH(self):
+        if "RH" in self.params:
+            return self.params["RH"]
+        else:
+            return 50
+
+    @property
+    def eta(self):
+        if "eta" in self.params:
+            return self.params["eta"]
+        else:
+            return get_viscosity(self.T, self.RH)
+
+    @property
+    def w0(self):
+        if "w0" in self.params:
+            return self.params["w0"]
+        else:
+            return get_resonance(self.m, self.k)
+
+    @property
+    def k(self):
+        if "k" in self.params:
+            return self.params["k"]
+        else:
+            return get_spring_constant(self.m, self.w0)
+
+    @property
+    def m(self):
+        if "m" in self.params:
+            return self.params["m"]
+        else:
+            return get_mass(self.R, self.rho)
+
+    @property
+    def rho(self):
+        if "rho" in self.params:
+            return self.params["rho"]
+        else:
+            return 3*self.m / (4 * np.pi * self.R**3)
+
+    @property
+    def gamma(self):
+        return get_gamma(self.R, self.eta)
+
+    @property
+    def taup(self):
+        return self.m / self.gamma
+
+    @property
+    def Gamma(self):
+        return 1 / self.taup
 
 
 def dataplot(ax, x, y, Npts=0, color="k", **kwargs):
