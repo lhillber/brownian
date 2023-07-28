@@ -69,8 +69,8 @@ def mic_response(f, lfs=0.68*1e-3):
 class VelocityResponse:
     def __init__(self, sensitivity, R, rho, T, k=0, RH=0, c0=None, rho_fluid=None, mu=None):
         self.sensitivity = sensitivity
-        self.R = R
-        self.k = k
+        self._R = R
+        self._k = k
         self.rho = rho
         self.T = T
         self.RH = RH
@@ -83,17 +83,41 @@ class VelocityResponse:
         self.c0 = c0
         self.rho_fluid = rho_fluid
         self.mu = mu
-
         self.Z0 = self.rho_fluid*self.c0
         self.delta = self.rho_fluid / self.rho
         self.nu = self.mu / self.rho_fluid
+
         self.m = get_mass(self.R, self.rho)
         self.gamma = get_gamma(self.R, self.mu)
         self.taup = self.m / self.gamma
         self.Gamma = 1/self.taup
         self.w0=np.sqrt(self.k / self.m)
 
+    @property
+    def R(self):
+        return self._R
 
+    @R.setter
+    def R(self, new_R):
+        self._R= new_R
+        self.m = get_mass(self.R, self.rho)
+        self.gamma = get_gamma(self.R, self.mu)
+        self.taup = self.m / self.gamma
+        self.Gamma = 1/self.taup
+        self.w0=np.sqrt(self.k / self.m)
+
+    @property
+    def k(self):
+        return self._k
+
+    @k.setter
+    def k(self, new_k):
+        self._k= new_k
+        self.m = get_mass(self.R, self.rho)
+        self.gamma = get_gamma(self.R, self.mu)
+        self.taup = self.m / self.gamma
+        self.Gamma = 1/self.taup
+        self.w0=np.sqrt(self.k / self.m)
     def response(self, name, f):
         F, G, H, I = getattr(self, f"_FGHI_{name}")(f)
         return self.sensitivity * (F + 1j*G) / (H + 1j*I)
@@ -204,6 +228,15 @@ class VelocityResponse:
         I += b*b * (1 + 4*d) - 9*d  + 3*d*b2_y * (b + 1) + 3*d*b*b_y2
         return 3*d* F, 3*d*G, H, I
 
+
+    def _FGHI_exactbound(self, f):
+        F, G, H, I = self._FGHI_exact(f)
+        w = 2 * np.pi * f
+        f = w * F
+        g = w * G
+        h = w*H + self.k/self.gamma * G
+        i = w*I - self.k/self.gamma * F
+        return f, g, h, i
 
     def plane_impedance(self, f, r0=0):
         return self.Z0

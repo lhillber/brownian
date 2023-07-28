@@ -365,7 +365,7 @@ class Collection:
         r = self.collection[0].r
         size = self.collection[0].size
         same_r = np.all([D.r == r for D in self.collection])
-        same_size = np.all([D.sixe == size for D in self.collection])
+        same_size = np.all([D.size == size for D in self.collection])
         assert same_r and same_size
 
     @property
@@ -420,6 +420,7 @@ class Collection:
             return func(timeseries.t, timeseries.x, **kwargs)
         Cs = Parallel(n_jobs=n_jobs)(delayed(workload)(C) for C in self.collection)
         self.collection = Cs
+
 
 
     def apply(self, method_str, n_jobs=1, recollect=False, **kwargs):
@@ -486,7 +487,7 @@ class CollectionTDMS(Collection):
         with TdmsFile.open(self.fname) as tdms_file:
             try:
                 t0 = tdms_file["main"]["t0"][:]
-            except:
+            except: #fix for labview error
                 t0 = tdms_file["main"]["Untitled"][:]
             t0 -= t0[0]
             t0 /= 1e6

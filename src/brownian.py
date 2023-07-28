@@ -221,6 +221,8 @@ def bin_func(xs, dt, taumax=None, func=np.mean):
 
 
 def logbin_func(x, Npts=100, func=np.mean):
+    if Npts is None:
+        return x
     ndecades = np.log10(x.size) - np.log10(1)
     npoints = int(ndecades) * Npts
     parts = np.logspace(
@@ -243,7 +245,27 @@ def detrend(xs, dt, taumax=None, mode='constant'):
         i += L
     return xdetrend
 
+
 def PSD(xs, dt, taumax=None, tmin=None, tmax=None, detrend="linear", window="hann", noverlap=None):
+    ts = np.arange(len(xs)) * dt
+    if tmin is None:
+        tmin = ts[0]
+    if tmax is None:
+        tmax = ts[-1]
+    mask = np.logical_and(ts>=tmin, ts<=tmax)
+    xpart = partition(xs[mask], dt, taumax)
+    Navg = len(xpart)
+    psdavg = 0
+    # average PSD of each partions
+    for xp in xpart:
+        # Bartlet PSD is welch PSD with zero overlap
+        freq, psd = welch(xp, fs=1/dt, nperseg=xp.size, window=window,
+                          detrend=detrend, noverlap=noverlap)
+        psdavg += psd / Navg
+    return freq, psdavg, Navg
+
+
+def _PSD_bak(xs, dt, taumax=None, tmin=None, tmax=None, detrend="linear", window="hann", noverlap=None):
     if tmin is not None or tmax is not None:
         ts = np.arange(len(xs)) * dt
         if tmin is None:
@@ -266,7 +288,6 @@ def PSD(xs, dt, taumax=None, tmin=None, tmax=None, detrend="linear", window="han
                               detrend=detrend, noverlap=noverlap)
             psdavg += psd / Navg
     return freq, psdavg, Navg
-
 
 def AVAR(xs, dt, func=np.mean, octave=True, base=2, Nmin=20):
     """Allan Variance"""
