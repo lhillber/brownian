@@ -215,10 +215,17 @@ def partition(xs, dt, taumax=None, noverlap=0):
     xpart = stride_windows(xs, n=Npts, noverlap=noverlap, axis=0).T
     return xpart
 
+def partitionN(xs, Npts=None, noverlap=0):
+    """Split xs into chunks overlapping by `noverlap` points.
+    Each chunk is size N"""
+    xpart = stride_windows(xs, n=Npts, noverlap=noverlap, axis=0).T
+    return xpart
+
+def bin_funcN(xs, Npts, func=np.mean):
+    return func(partitionN(xs, Npts), axis=1)
 
 def bin_func(xs, dt, taumax=None, func=np.mean):
     return func(partition(xs, dt=dt, taumax=taumax), axis=1)
-
 
 def logbin_func(x, Npts=100, func=np.mean):
     if Npts is None:

@@ -16,7 +16,7 @@ from scipy.signal import butter, sosfiltfilt, sosfilt, get_window
 from scipy.fft import rfft, rfftfreq, irfft
 from joblib import Parallel, delayed
 from brownian import (
-    partition, bin_func, detrend, PSD, MSD, ACF, AVAR, NVAR, HIST, logbin_func
+    partition, bin_funcN, detrend, PSD, MSD, ACF, AVAR, NVAR, HIST, logbin_func
     )
 
 
@@ -195,8 +195,8 @@ class TimeSeries:
         if Npts in (1, None):
             t2, x2 = self.t, self.x
         else:
-            x2 = bin_func(self.x, dt=1/self.r, taumax=(Npts-1)/self.r)
-            t2 = bin_func(self.t, dt=1/self.r, taumax=(Npts-1)/self.r)
+            x2 = bin_funcN(self.x, Npts)
+            t2 = bin_funcN(self.t, Npts)
             if inplace:
                 self.t = t2
                 self.x = x2

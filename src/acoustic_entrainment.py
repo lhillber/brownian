@@ -118,6 +118,7 @@ class VelocityResponse:
         self.taup = self.m / self.gamma
         self.Gamma = 1/self.taup
         self.w0=np.sqrt(self.k / self.m)
+
     def response(self, name, f):
         F, G, H, I = getattr(self, f"_FGHI_{name}")(f)
         return self.sensitivity * (F + 1j*G) / (H + 1j*I)
