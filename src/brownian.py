@@ -7,7 +7,7 @@ from time import time
 import numpy as np
 from constants import kB
 import matplotlib.pyplot as plt
-from matplotlib.mlab import stride_windows
+#from matplotlib.mlab import stride_windows
 from copy import copy
 from numba import jit
 from cmath import sqrt
@@ -16,6 +16,10 @@ from scipy.integrate import simps
 from scipy.signal import welch, detrend
 sigdetrend = detrend # Alias
 
+
+#from matplotlib.mlab import stride_windows
+def stride_windows(x, n, noverlap, axis):
+    return np.lib.stride_tricks.sliding_window_view(x, n, axis)[::n-noverlap].T
 
 #def get_viscosity(T, etap=1.83245e-5, Tp=23+273.15, S=110.4):
 #    """Sutherlands model for viscosity of air at temperature T"""
@@ -490,7 +494,7 @@ def abc_guess(freq, psd, n=1):
     Sinvmat *= (n+1) / n
     popt0 = Sinvmat.dot(Svec)
     _, pSinvmat, _ = get_Smat(freq, psd_abc_func(freq, *popt0))
-    pcov0 = (n+3) * pSinvmat / (n + 1) / freq.size
+    pcov0 = (n+3) * pSinvmat / (n + 1) / (n*2*freq.size)
     return popt0, pcov0
 
 def gaussian_func(x, var, mean=0):
@@ -503,7 +507,7 @@ def psd_abc_func(f, a, b, c, **kwargs):
 def psd_func(f, k, rho, T, R, eta=None, RH=50, **kwargs):
     if eta is None:
         eta = get_viscosity(T, RH=RH)
-    if T <= 2773.15:
+    if T <= 273.15:
         T = T+273.15
     m = 4*np.pi*rho*R**3/3
     gamma = 6*np.pi*eta*R

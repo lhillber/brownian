@@ -3,9 +3,15 @@ from brownian import get_gamma, get_mass, get_viscosity, get_sound_speed, get_ai
 from constants import kB
 from scipy.fft import rfft, rfftfreq, irfft
 from scipy.signal import get_window
-from scipy.special import hankel2
+from scipy.special import hankel2, kv
 from time_series import TimeSeries
 from scipy.interpolate import interp1d
+
+def diaci_sensitivity(freqs, distance, c0=343.):
+    s = 2*np.pi*1j*freqs
+    tau = distance/c0
+    return 2 * tau * s * kv(1, tau*s) * np.exp(tau * s)
+
 
 def _amp_factor(f1, f2):
     return np.sqrt(1 + (f1/f2)**2)
@@ -61,10 +67,13 @@ def mic_response_pressure(f, lfs=0.68*1e-3):
 
 
 def mic_response(f, lfs=0.68*1e-3):
-    return mic_sensitivity_interp(
+    response = mic_sensitivity_interp(
             lfs=lfs,
             fs=fs_orig,
             dBs=dBs_orig+free_field_0deg_no_grid_dBs)(f)
+    mask = f>fs_orig[-1]
+    response[mask] = response[np.logical_not(mask)][-1]
+    return response
 
 class VelocityResponse:
     def __init__(self, sensitivity, R, rho, T, k=0, RH=0, c0=None, rho_fluid=None, mu=None):
@@ -72,6 +81,8 @@ class VelocityResponse:
         self._R = R
         self._k = k
         self.rho = rho
+        if T <=273.15:
+            T += 273.15
         self.T = T
         self.RH = RH
         if c0 is None:
@@ -181,6 +192,11 @@ class VelocityResponse:
     def eps(self, f):
         return 3/2 * np.sqrt(self.delta*self.taup*2*np.pi*f)
 
+    def gamma_f(self, f):
+        tf = 9*self.delta*self.taup/2
+        w = self.w(f)
+        return self.gamma * (1 + np.sqrt(-1j*tf*w) - 1j* tf*w/9)
+
 
     def _FGHI_stokesbound(self, f):
         F = self.Gamma * self.w(f)
@@ -230,6 +246,18 @@ class VelocityResponse:
         return 3*d* F, 3*d*G, H, I
 
 
+    def _FGHI_bassetbound2(self, f):
+        w = self.w(f)
+        gamma_f = self.gamma_f(f)
+        num = gamma_f  - 1j*w*self.delta*self.m
+        denom = gamma_f - 1j*w*self.m + 1j*self.k/w
+        F = np.real(num)
+        G = np.imag(num)
+        H = np.real(denom)
+        I = np.imag(denom)
+        return F, G, H, I
+
+
     def _FGHI_exactbound(self, f):
         F, G, H, I = self._FGHI_exact(f)
         w = 2 * np.pi * f
@@ -276,6 +304,8 @@ class VelocityResponse:
         num = 4 * kB * self.T * G / self.m
         denom = G*G*w*w +(self.w0**2 - w*w)**2
         return num / denom + chi
+
+
 
 
     def Sv_stokes(self, f, chi=0):

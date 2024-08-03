@@ -12,7 +12,7 @@ from copy import copy
 from scipy.integrate import simps
 from scipy.optimize import curve_fit, minimize
 from nptdms import TdmsFile
-from scipy.signal import butter, sosfiltfilt, sosfilt, get_window
+from scipy.signal import butter, sosfiltfilt, firwin2, minimum_phase, tf2sos, get_window
 from scipy.fft import rfft, rfftfreq, irfft
 from joblib import Parallel, delayed
 from brownian import (
@@ -242,7 +242,7 @@ class TimeSeries:
         return t2, x2
 
 
-    def correct(self, response, tmin=None, tmax=None,
+    def correct_bak(self, response, tmin=None, tmax=None,
         window="boxcar", differentiate=False, name=None):
 
         if name is None:
@@ -259,9 +259,49 @@ class TimeSeries:
         fft_vals = rfft(sig * win)
         if differentiate:
             fft_vals *= 1j * np.sin(2*np.pi*freq*dt)/dt
-            #fft_vals *= 1j * (2*np.pi*freq)
         corrected_signal = irfft(fft_vals / corr / resp, n=signal_length)
         D = TimeSeries(corrected_signal, t, name=name)
+        return D
+
+
+    def correct(self, response, tmin=None, tmax=None,
+        window="boxcar", differentiate=False, name=None):
+
+        if name is None:
+            name = self.name+" corrected"
+        dt = 1/self.r
+        t, sig = self.time_gate(tmin=tmin, tmax=tmax)
+        signal_length = len(sig)
+        freq = rfftfreq(signal_length, dt)[1:]
+        resp = response(freq)
+        resp = np.r_[1, resp]
+        freq = np.r_[0, freq]
+        win = get_window(window, signal_length)
+        corr = np.sqrt(np.sum(win**2)/signal_length) #amp correction
+        fft_vals = rfft(sig * win, n=signal_length)
+        if differentiate:
+            fft_vals *= 1j * np.sin(2*np.pi*freq*dt)/dt
+        corrected_signal = irfft(fft_vals / corr / resp, n=signal_length)
+        D = TimeSeries(corrected_signal, t, name=name)
+        return D
+
+
+    def correct2(self, freqs, gains, numtaps, tmin=None, tmax=None, name=None):
+
+        if name is None:
+            name = self.name+" corrected"
+        dt = 1/self.r
+        t, sig = self.time_gate(tmin=tmin, tmax=tmax)
+
+        filt1 = firwin2(numtaps, np.r_[0, freqs], np.r_[0, gains], fs=2*freqs[-1])
+        filt2 = minimum_phase(filt1)
+        filt3 = np.real(np.fft.ifft(1 / np.fft.fft(filt2)))
+        filt = tf2sos(filt3, [1.])
+        corrected_signal = sosfiltfilt(filt, sig)
+        D = TimeSeries(corrected_signal, t, name=name)
+        D.filt1 = filt1
+        D.filt2 = filt2
+        D.filt3 = filt3
         return D
 
 

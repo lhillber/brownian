@@ -51,6 +51,7 @@ class Simulation:
 
 
     def set_tweezers(self, fname, power_F, power_B):
+        # Requires additional modules
         from tweezer_force import Tweezers, Domain
         tweezers = Tweezers()
         tweezers.load(fname)
